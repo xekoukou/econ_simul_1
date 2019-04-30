@@ -1,7 +1,7 @@
-function Simulation(initial_values_, charts_info_, graphs_info_, equations_, sample_rate_, update_rate_) {
+function Simulation(Env_, charts_info_, graphs_info_, equations_, sample_rate_, update_rate_) {
    
-    this.initial_values = initial_values_;
-    this.values = null;
+    this.Env = Env_;
+    this.env = null;
 
     this.charts_info = charts_info_;
     this.graphs_info = graphs_info_;
@@ -28,14 +28,14 @@ Simulation.prototype.simulate = function() {
         var l = 1;
         while (self.time < self.update_rate * (self.sample_time + 1)) {
             while (self.time < self.update_rate * self.sample_time + l * self.sample_rate) {
-                self.equations(self.time, self.values, self.xgraphs);
+                self.equations(self.time, self.env, self.xgraphs);
                 self.time++;
             }
             l++;
             Object.keys(self.xpoints).forEach(function(key) {
                 var x_name = self.xcharts[key].x_name;
                 var y_name = self.xcharts[key].y_name;
-                self.xpoints[key].push(new Point(x_name == 'time' ? self.time : self.values[x_name], self.values[y_name]));
+                self.xpoints[key].push(new Point(x_name == 'time' ? self.time : self.env[x_name], self.env[y_name]));
             });
         }
         self.sample_time++;
@@ -56,7 +56,7 @@ Simulation.prototype.simulate = function() {
 Simulation.prototype.start = function() {
     var self = this;
     if (self.hasStopped === true && self.hasStarted === false) {
-        self.values = self.initial_values.clone();
+        self.env = new self.Env();
 
 
         self.charts_info.forEach(function(each) {
@@ -69,8 +69,8 @@ Simulation.prototype.start = function() {
             $("#" + each[0]).css("height", each[2]);
             self.xgraphs[each[0]] = new sigma(each[0]);
             self.xgraphs[each[0]].graph.read({
-                "nodes": each[3] === null ? [] : self.values[each[3]],
-                "edges": each[4] === null ? [] : self.values[each[4]]
+                "nodes": each[3] === null ? [] : self.env[each[3]],
+                "edges": each[4] === null ? [] : self.env[each[4]]
             });
             self.xgraphs[each[0]].startForceAtlas2();
             self.xgraphs[each[0]].startForceAtlas2({
@@ -113,7 +113,7 @@ Simulation.prototype.reset = function() {
         }
     });
     
-    self.values = null;
+    self.env = null;
     self.xgraphs = {};
     self.xcharts = {};
     self.xpoints = {};

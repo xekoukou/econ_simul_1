@@ -1,3 +1,277 @@
+function rand(width) {
+    return Math.floor(Math.random() * (width + 1));
+}
+
+function Opportunity(j , o) {
+    this.jobs = rand(j) ;
+    this.output = rand(o);
+}
+
+function Dept(id , amount) {
+    this.id = amount;
+    this.amount = amount;
+}
+
+function Loan(id , amount) {
+    this.id = amount;
+    this.amount = amount;
+}
+
+function Agent(id , money , nl , na) {
+    // the amount of memory
+    this.nl = nl;
+    this.id = id;
+    // the amount of money
+    this.money = money;
+    this.prev_prod_profit = 0;
+    this.prev_loan_profit = 0;
+    // The amount of money he is in debt.
+    this.total_debt = 0;
+    this.debts = [];
+    // The amount of money he has lent to others.
+    this.lent_money = 0;
+    this.loans = [];
+    this.prev_price_higher = 0;
+    this.prev_loan_rate_higher = 0;
+    // Ids of the agents that own the company.
+    this.known_products = [];
+    for (var i = 0; i < nl; i++) {
+	this.known_products.push(rand(na));
+    }
+    this.known_workplaces = [];
+    for (var i = 0; i < nl; i++) {
+	this.known_workplaces.push(rand(na));
+    }
+    this.known_loan_rates = [];
+    for (var i = 0; i < nl; i++) {
+	this.known_loan_rates.push(rand(na));
+    }
+    this.opportunities = [ new Opportunity(1 , 1) ];
+    this.company = this.opportunities[0];
+    this.changed_op = 0;
+    this.provided_wage = 1;
+    this.product_price = 1;
+    this.loan_rate = 1;
+    this.production = 0;
+    this.jobs_filled = 0;
+    this.units_sold = 0;
+    this.company_funded = 0;
+}
+
+
+function agent_adapt(agent) {
+    var op = agent.company;
+    var jf = agent.jobs_filled;
+    var prod = agent.production;
+    var th_profit = op.output * agent.product_price - op.jobs * agent.provided_wage;
+    var re_profit;
+    if(jf == op.jobs) {
+	re_profit = prod * agent.product_price - jf * agent.provided_wage;
+    } else {
+	re_profit = 0;
+    }
+
+    if((th_profit - op.jobs > 0) && (jf < op.jobs)) {
+	agent.provided_wage++;
+    }
+    if((jf == op.jobs) && rand(1)) {
+	agent.provided_wage--;
+    }
+    if ((jf == op.jobs) && (re_profit > agent.prev_prod_profit) && (agent.changed_op == 0)) {
+	if (agent.prev_price_higher == 1) {
+	    if (profit - prod > 0) {
+		agent.product_price--;
+		agent.prev_price_higher = 1;
+	    }
+	} else {
+	    agent.product_price++;
+	    agent.prev_price_higher = 0;
+	}
+    }
+    if ((jf == op.jobs) && (re_profit < agent.prev_prod_profit) && (agent.changed_op == 0)) {
+	if (agent.prev_price_higher == 1) {
+	    agent.product_price++;
+	    agent.prev_price_higher = 0;
+	} else {
+	    if (profit - prod > 0) {
+		agent.product_price--;
+		agent.prev_price_higher = 1;
+	    }
+	}
+    }
+
+    agent.prev_prod_profit = re_profit;
+    agent.changed_op = 0;
+
+    var loan_profit = agent.lent_money * agent.loan_rate;
+    if(agent.prev_loan_profit < loan_profit) {
+	if(agent.prev_loan_rate_higher == 1) {
+	    if(agent.loan_rate > 1){
+		agent.loan_rate--;
+	    }
+	} else {
+	    agent.loan_rate++;
+	}
+    } else {
+	if(agent.prev_loan_rate_higher == 1) {
+	    agent.loan_rate++;
+	} else {
+	    if(agent.loan_rate > 1){
+		agent.loan_rate--;
+	    }
+	}
+    }
+}
+
+// probability of new opportunity is 1 / op_change
+function agent_learn(agent , agents , na , op_chance , jobs_width , output_width , learn_chance) {
+    if(rand(op_chance - 1) == 0) {
+	var nop = new Opportunity(jobs_width , output_width);
+	agent.opportunities.push(nop);
+    }
+    if(rand(learn_chance - 1) == 0) {
+	var nw = rand(na);
+	var nag = agents[nw];
+	for (var i = 0; i < agent.nl; i++) {
+	    var other = agent.known_workplaces[i];
+	    if(agents[other].provided_wage < nag.provided_wage) {
+		agent.known_workplaces[i] = nw;
+		nw = other;
+		nag = agents[nw];
+	    }
+	}
+	var np = rand(na);
+	var nagp = agents[np];
+	for (var i = 0; i < agent.nl; i++) {
+	    var other = agent.known_products[i];
+	    if(agents[other].product_price < nagp.product_price) {
+		agent.known_products[i] = np;
+		np = other;
+		nagp = agents[np];
+	    }
+	}
+	var nr = rand(na);
+	var nagr = agents[nr];
+	for (var i = 0; i < agent.nl; i++) {
+	    var other = agent.known_loan_rates[i];
+	    if(agents[other].loan_rate < nagr.loan_rate) {
+		agent.known_products[i] = nr;
+		nr = other;
+		nagr = agents[nr];
+	    }
+	}
+    }
+}
+
+function agent_find_cheapest (agent , agents) {
+    var id = agent.known_products[0];
+    var price = agents[id].product_price;
+    for (var i = 1; i < agent.nl; i++) {
+	var nid = agent.known_products[i];
+	var nprice = agents[nid].product_price;
+	var available = agents[nid].production - agents[nid].units_sold;
+	if ((nprice < price) && (available > 0)) {
+	    id = nid;
+	    price = nprice;
+	}
+    }
+    var available = agents[id].production - agents[id].units_sold;
+    if(available > 0) {
+	return id;
+    } else {
+	return -1;
+    }
+}
+
+function agent_buy(agent , agents , cwidth) {
+    var con = rand(cwidth);
+    while((agent.money > 0) && (con > 0)) {
+	con--;
+	var id = agent_find_cheapest(agent , agents);
+	if (id == -1) {
+	    return;
+	} else {
+	    var seller = agents[id];
+	    if(agent.money < seller.product_price) {
+		return;
+	    } else {
+		agent.money = agent.money - seller.product_price;
+		seller.money = seller.money + seller.product_price;
+		seller.units_sold++;
+	    }
+	}
+    }
+}
+
+// This is based on the current perception of wages and product prices of the agent.
+// Thus the best option depends on the market.
+function agent_pick_best_opportunity(agent) {
+    var price = agent.product_price;
+    var wage = agent.provided_wage;
+    var op = agent.company;
+    var the_profit = op.output * price - op.jobs * wage;
+    for (var i = 0; i < agent.opportunities.length; i++) {
+	var nop = agent.opportunities[i];
+	var nprofit = nop.output * price - nop.jobs * wage;
+	if (nprofit > the_profit) {
+	    op = nop;
+	    the_profit = nprofit;
+	}
+    }
+    -- inequality
+    if((agent.company.jobs != op.jobs) || (agent.company.output != op.output)){
+	agent.company = op;
+	agent.changed_op = 1;
+    }
+}
+function agent_fund_company(agent , agents) {
+    var req = agent.company.jobs * agent.provided_wage;
+    if(agent.money >= req) {
+	agent.company_funded = 1;
+    } else {
+	if(
+    }
+}
+
+function agent_work(agent , agents) {
+    var id = agent.known_workplaces[0];
+    var price = agents[id].provided_wage;
+    for (var i = 1; i < agent.nl; i++) {
+	var nid = agent.known_products[i];
+	var nprice = agents[nid].product_price;
+	var available = agents[nid].production - agents[nid].units_sold;
+	if ((nprice < price) && (available > 0)) {
+	    id = nid;
+	    price = nprice;
+	}
+    }
+    var available = agents[id].production - agents[id].units_sold;
+    if(available > 0) {
+	return id;
+    } else {
+	return -1;
+    }
+}
+
+function agent_update(agent) {
+}
+
+function Environment(){
+    var na = 1000;
+    var money = 2000;
+    this.na = na;
+    this.agents = [];
+    for (var i = 0; i < na; i++) {
+	this.agents.push(new Agent(i , money));
+    }
+    this.s = 1;
+}
+
+
+function equation(t, env, graphs_all) {
+    env.s = env.s + 1;
+}
+
 function Person(id, birth_year) {
     this.clone = true;
     this.x = Math.floor(Math.random() * 101);
@@ -13,7 +287,7 @@ function Person(id, birth_year) {
     this.second_half;
 }
 
-function create_initial_values() {
+function Env() {
     var people = [];
     people.push(new Person(1, 0));
     people.push(new Person(2, 0));
@@ -22,23 +296,16 @@ function create_initial_values() {
     people.push(new Person(5, 0));
 
 
-    return {
-        "next_id": 6,
-        "people": people,
-        "not_married_male": [],
-        "not_married_female": [],
-        "married_female": [],
-        "young": people.slice(),
-        "number_young": 5,
-        "number_married": 0,
-        "population": 5
-    };
+    this.next_id = 6;
+    this.people = people;
+    this.not_married_male = [];
+    this.not_married_female = [];
+    this.married_female = [];
+    this.young = people.slice();
+    this.number_young = 5;
+    this.number_married = 0;
+    this.population = 5;
 }
-
-var initial_values = create_initial_values();
-
-initial_values.clone = create_initial_values;
-
 
 function population(t, values, graphs_all) {
     var not_married_male = values["not_married_male"];
@@ -47,7 +314,7 @@ function population(t, values, graphs_all) {
     var people = values["people"];
     var young = values["young"];
 
-    var graph = graphs_all["graph_id"].graph;
+ //   var graph = graphs_all["graph_id"].graph;
 
     //Every month, 1/100 chance to marry a woman.
     var i = 0;
@@ -71,11 +338,11 @@ function population(t, values, graphs_all) {
             woman.second_half = man;
             values.number_married += 2;
             married_female.push(woman);
-            graph.addEdge({
-                "id": "" + values.next_id,
-                "source": woman.id,
-                "target": man.id
-            });
+      //      graph.addEdge({
+      //          "id": "" + values.next_id,
+      //          "source": woman.id,
+      //          "target": man.id
+      //      });
             values.next_id++;
         } else {
             i++;
@@ -110,18 +377,18 @@ function population(t, values, graphs_all) {
             }
             woman.children.push(child);
 
-            graph.addNode(child);
-            graph.addEdge({
-                "id": "" + values.next_id,
-                "source": woman.id,
-                "target": child.id
-            });
+        //    graph.addNode(child);
+        //    graph.addEdge({
+        //        "id": "" + values.next_id,
+        //        "source": woman.id,
+        //        "target": child.id
+        //    });
             values.next_id++;
-            graph.addEdge({
-                "id": "" + values.next_id,
-                "source": woman.second_half.id,
-                "target": child.id
-            });
+        //    graph.addEdge({
+        //        "id": "" + values.next_id,
+        //        "source": woman.second_half.id,
+        //        "target": child.id
+        //    });
             values.next_id++;
 
         }
@@ -146,9 +413,9 @@ function population(t, values, graphs_all) {
 }
 
 var simulation = new Simulation(
-    initial_values, [
-        ["time","population", "test_id", 900, 400],
-        ["population","number_young", "test_id2", 900, 400]
+    Environment , [
+        ["time","s", "test_id", 900, 400],
+        ["s","s", "test_id2", 900, 400]
     ], [
-        ["graph_id", 1200, 800, "people", null]
-    ], population,10,100);
+        // ["graph_id", 1200, 800, "people", null]
+    ], equation , 10 , 100);
