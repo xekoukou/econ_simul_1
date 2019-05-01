@@ -7,15 +7,12 @@ function Opportunity(j , o) {
     this.output = rand(o);
 }
 
-function Dept(id , amount) {
-    this.id = amount;
+function Dept(id , amount , loan_rate) {
+    this.id = id;
     this.amount = amount;
+    this.loan_rate = loan_rate;
 }
 
-function Loan(id , amount) {
-    this.id = amount;
-    this.amount = amount;
-}
 
 function Agent(id , money , nl , na) {
     // the amount of memory
@@ -29,6 +26,8 @@ function Agent(id , money , nl , na) {
     this.total_debt = 0;
     this.debts = [];
     // The amount of money he has lent to others.
+    // This is to be set to zero every turn before new lending happens because we use it to
+    // find the loan profitability with the current loan_rate.
     this.lent_money = 0;
     this.loans = [];
     this.prev_price_higher = 0;
@@ -58,6 +57,12 @@ function Agent(id , money , nl , na) {
     this.company_funded = 0;
 }
 
+function agent_the_profit(agent) {
+    var op = agent.company;
+    var jf = agent.jobs_filled;
+    var prod = agent.production;
+    return op.output * agent.product_price - op.jobs * agent.provided_wage;  
+}
 
 function agent_adapt(agent) {
     var op = agent.company;
@@ -103,6 +108,9 @@ function agent_adapt(agent) {
     agent.prev_prod_profit = re_profit;
     agent.changed_op = 0;
 
+    // Here we might not have enough money to lend if we decrease the rate of profit.
+    // See min_money_multi.
+    // Since the profits will not rise, the agent will self correct himself.
     var loan_profit = agent.lent_money * agent.loan_rate;
     if(agent.prev_loan_profit < loan_profit) {
 	if(agent.prev_loan_rate_higher == 1) {
@@ -224,12 +232,77 @@ function agent_pick_best_opportunity(agent) {
 	agent.changed_op = 1;
     }
 }
-function agent_fund_company(agent , agents) {
+
+// The multiplier is used so as to avoid halting the operation of the company by lending money to others.
+function agent_find_lower_rate (agent , money_needed , agents , min_money_multi) {
+    var id = agent.known_loan_rates[0];
+    var rate = agents[id].loan_rate;
+    for (var i = 1; i < agent.nl; i++) {
+	var nid = agent.known_loan_rates[i];
+	var nrate = agents[nid].loan_rate;
+	min_money = min_money_multi * (agents[nid].company.jobs * agents[nid].provided_wage);
+	if ((nrate < rate) && (agents[nid].money - min_money - money_needed > 0)) {
+	    id = nid;
+	    rate = nrate;
+	}
+    }
+    var min_money = min_money_multi * (agents[id].company.jobs * agents[id].provided_wage);
+    if(agents[id].money - min_money - money_needed > 0) {
+	return id;
+    } else {
+	return -1;
+    }
+}
+
+
+// Here I assume that the lenders give money to everyone that is asking,
+// and that the borrower will pay eveentually all his debt, no defaults are possible.
+// This is to simplify the model.
+function agent_fund_company(agent , agents , min_money_multi) {
+    agent.company_funded = 0;
+    if(agent.total_debt > 0) {
+	return;
+    }
     var req = agent.company.jobs * agent.provided_wage;
     if(agent.money >= req) {
 	agent.company_funded = 1;
     } else {
-	if(
+	rem = agent.money - req;
+	id = agent_find_lower_rate (agent , req , agents , min_money_multi);
+	if(id != -1) {
+	    var lender = agents[id];
+            var loan = (lender.loan_rate + 100) * rem / 100
+            if(agent_the_profit(agent) - loan > 0) {
+		agent.company_funded = 1;
+		agent.money = agent.money + rem;
+		agent.total_debt = agent.total_debt + loan;
+		agent.debts.push(new Dept(id , rem , lender.loan_rate));
+		lender.money = lender.money - rem;
+		lender.lent_money = lender.lent_money + rem;
+	    }
+	}
+    }
+}
+
+// This should be done before consumption.
+//agent.lent_money is set to zero in every cycle.
+function agent_pay_debt(agent, agents) {
+    while ((agent.total_debt != 0) && (agent.money > 0)) {
+	var debt = agent.debts.pop();
+	var lender = agents[debt.id];
+        var loan = (debt.loan_rate + 100) * debt.amount / 100
+	if (agent.money >= loan){
+	    agent.money = agent.money - loan;
+	    agent.total_debt = agent_total_debt - loan;
+	    lender.money = lender.money + loan;
+	} else {
+	    var repaid = agent.money;
+	    agent.money = 0;
+	    agent.total_debt = agent_total_debt - repaid;
+	    lender.money = lender.money + repaid;
+	    debt.amount = debt.amount - repaid * 100 / (100 + debt.loan_rate);
+	    agent.debts.push(debt);
+	}
     }
 }
 
