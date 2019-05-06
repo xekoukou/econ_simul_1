@@ -54,15 +54,13 @@ function Agent(id , money , nl , na) {
     this.money = money;
     this.prev_prod_profit = 0;
     this.prev_loan_profit = 0;
-    // The amount of money he is in debt.
-    this.total_debt = 0;
     this.debts = [];
     // The amount of money he has lent to others.
     // This is to be set to zero every turn before new lending happens because we use it to
     // find the loan profitability with the current loan_rate.
     this.lent_money = 0;
     this.loans = [];
-    this.prev_price_higher = 0;
+    this.prev_price_higher = -1;
     this.prev_loan_rate_higher = 0;
     // Ids of the agents that own the company.
     this.known_products = [];
@@ -116,54 +114,67 @@ function agent_profit(agent) {
 
 function agent_adapt(agent) {
     var op = agent.opportunities[agent.company_id];
-    var jf = agent.jobs_filled;
-    var units_sold = agent.units_sold;
     var th_profit = agent_the_profit(agent);
-    var re_profit;
-    if(jf == op.jobs) {
-	re_profit = agent_profit(agent);
-    } else {
-	re_profit = 0;
-    }
 
-    if((th_profit - op.jobs > 0) && (jf < op.jobs)) {
-	agent.provided_wage++;
-    }
-    // No worker will accept a non positive wage.
-    //If there was production , try to opprtunistically reduce the wages.
-    //If not funded , reduce the wage.
-    if((jf == op.jobs && rand(2)) && (agent.provided_wage > 1)) {
+    // Not funded means that the agent does not have any money to fund it.
+    //Reduce wages.
+    if(agent.company_funded == 0 && agent.provided_wage > 1){
 	agent.provided_wage--;
     }
-    if ((jf == op.jobs) && (re_profit > agent.prev_prod_profit) && (agent.changed_op == 0)) {
-	if (agent.prev_price_higher == 1) {
-	    if (re_profit - units_sold > 0) {
-		agent.product_price--;
-		agent.prev_price_higher = 1;
-	    }
-	} else {
-	    agent.product_price++;
-	    agent.prev_price_higher = 0;
+
+    if(agent.company_funded == 1) {
+	
+	// If there is a theoretical profit , but not enough workers , increase wage.
+	if((th_profit - agent.jobs_filled > 0) && (agent.jobs_filled < op.jobs)) {
+	    agent.provided_wage++;
 	}
-    }
-    if ((jf == op.jobs) && (re_profit <= agent.prev_prod_profit) && (agent.changed_op == 0)) {
-	if (agent.prev_price_higher == 1) {
-	    agent.product_price++;
-	    agent.prev_price_higher = 0;
-	} else {
-	    if (re_profit - units_sold > 0) {
-		agent.product_price--;
-		agent.prev_price_higher = 1;
+	
+	if(agent.jobs_filled == op.jobs) {
+	    var	re_profit = agent_profit(agent);
+
+	    if(agent.prev_price_higher == -1 || agent.changed_op == 1){
+		if(rand(2)){
+		    agent.product_price++;
+		    agent.prev_price_higher = 0;
+		} else {
+		    agent.product_price--;
+			agent.prev_price_higher = 1;
+		}
+	    } else {
+		
+		if (re_profit > agent.prev_prod_profit) {
+		    if (agent.prev_price_higher == 1) {
+			agent.product_price--;
+		    } else {
+			agent.product_price++;
+		    }
+		}
+		if (re_profit <= agent.prev_prod_profit) {
+		    if (agent.prev_price_higher == 1) {
+			agent.product_price++;
+			agent.prev_price_higher = 0;
+		    } else {
+			agent.product_price--;
+			agent.prev_price_higher = 1;
+		    }
+		}
+
+		if(rand(2)) {
+		    // Reduce the wage
+		    if(agent.provided_wage > 1) {
+			agent.provided_wage--;
+			agent.prev_price_higher = -1;
+		    }
+		}
 	    }
+	    // Update the previous profit variable.
+	    agent.prev_prod_profit = re_profit;
 	}
+    } else {
+	agent.prev_prod_profit = 0;
     }
 
-    agent.prev_prod_profit = re_profit;
-    agent.changed_op = 0;
-
-    // Here we might not have enough money to lend if we decrease the rate of profit.
-    // See min_money_multi.
-    // Since the profits will not rise, the agent will self correct himself.
+    // Interest rate policy
     var loan_profit = agent.lent_money * agent.loan_rate / 100;
     if(agent.prev_loan_profit < loan_profit) {
 	if(agent.prev_loan_rate_higher == 1) {
@@ -176,9 +187,11 @@ function agent_adapt(agent) {
     } else {
 	if(agent.prev_loan_rate_higher == 1) {
 	    agent.loan_rate++;
+	    agent.prev_loan_rate_higher = 0;
 	} else {
 	    if(agent.loan_rate > 1){
 		agent.loan_rate--;
+		agent.prev_loan_rate_higher = 1;
 	    }
 	}
     }
@@ -395,7 +408,7 @@ function agent_find_lower_rate (agent , money_needed , agents , min_money_multi)
 function agent_fund_company(agent , agents , par) {
     agent.company_funded = 0;
     agent.changed_op = 0;
-    if(agent.total_debt > 0) {
+    if(agent.debts.length > 0) {
 	return;
     }
     var company_id = agent.company_id;
@@ -421,7 +434,6 @@ function agent_fund_company(agent , agents , par) {
 		    agent.company_id = op_id;
 		    agent.company_funded = 1;
 		    agent.money = agent.money + rem;
-		    agent.total_debt = agent.total_debt + loan;
 		    agent.debts.push(new Dept(lid , rem , lender.loan_rate));
 		    lender.money = lender.money - rem;
 		    assert(lender.money >= 0 , "Lender money non negative");
@@ -442,22 +454,19 @@ function agent_fund_company(agent , agents , par) {
 // This should be done after consumption.
 //agent.lent_money is set to zero in every cycle.
 function agent_pay_debt(agent, agents) {
-    while ((agent.total_debt != 0) && (agent.money > 0)) {
+    while ((agent.debts.length > 0) && (agent.money > 0)) {
 	var debt = agent.debts.pop();
 	var lender = agents[debt.id];
         var loan = Math.floor ((debt.loan_rate + 100) * debt.amount / 100)
 	if (agent.money >= loan){
 	    agent.money = agent.money - loan;
 	    assert(agent.money >= 0 , "Borrower money non negative");
-	    agent.total_debt = agent.total_debt - loan;
-	    assert(agent.total_debt >= 0 , "Debt should be positive.");
 	    lender.money = lender.money + loan;
 	} else {
 	    var repaid = agent.money;
 	    agent.money = 0;
-	    agent.total_debt = agent.total_debt - repaid;
 	    lender.money = lender.money + repaid;
-	    debt.amount = debt.amount - repaid * 100 / (100 + debt.loan_rate);
+	    debt.amount = Math.floor (debt.amount - (repaid * 100 / (100 + debt.loan_rate)));
 	    agent.debts.push(debt);
 	}
     }
@@ -544,11 +553,11 @@ function Par(){
     this.na = 1000;
     this.money = 1000;
     this.op_chance = 10000;
-    this.jobs_width = 5;
-    this.output_width = 5;
+    this.jobs_width = 10;
+    this.output_width = 2;
     this.learn_chance = 2;
     this.learn_times = 5;
-    this.cwidth = 5;
+    this.cwidth = 10;
     this.min_money_multi = 5;
     
 }
@@ -564,6 +573,8 @@ function Environment(){
     this.average_price = 0;
     this.average_wage = 0;
     this.employment = 0;
+    this.average_loan_rate = 0;
+    this._total_lent_money = 0;
     this.total_money = this.par.na * this.par.money;
 }
 
@@ -573,6 +584,36 @@ function compute_total_production(agents) {
 	production = production + agent.production;
     });
     return production;
+}
+
+
+function compute_total_lent_money(agents) {
+    var lent_money = 0;
+    agents.forEach(function(agent){
+	var m = 0;
+	agent.debts.forEach(function(debt){
+	    m = m + debt.amount;
+	});
+
+	lent_money = lent_money + m;
+    });
+    return lent_money;
+}
+
+function compute_average_loan_rate(agents , lent_money, prev_rate) {
+    if(lent_money == 0){
+	return prev_rate;
+    }
+    var rate = 0;
+    agents.forEach(function(agent){
+	var m = 0;
+	agent.debts.forEach(function(debt){
+	    m = m + debt.amount * debt.loan_rate;
+	});
+
+	rate = rate + m;
+    });
+    return rate / lent_money;
 }
 
 function compute_total_sales(agents) {
@@ -644,8 +685,10 @@ function equation(t, env) {
     env.total_production = compute_total_production(env.agents);
     env.total_sales = compute_total_sales(env.agents);
     env.employment = compute_employment(env.agents);
+    env.total_lent_money = compute_total_lent_money(env.agents);
     env.average_price = compute_average_price(env.agents , env.total_sales , env.average_price);
     env.average_wage = compute_average_wage(env.agents , env.employment , env.average_wage);
+    env.average_loan_rate = compute_average_loan_rate(env.agents , env.total_lent_money , env.average_loan_rate);
 
     perform_action(env.agents , agent_pay_debt , env.par);
     perform_action(env.agents , agent_adapt , env.par);
@@ -663,6 +706,8 @@ function Result(env) {
     this.average_price = env.average_price;
     this.employment = env.employment;
     this.average_wage = env.average_wage;
+    this.total_lent_money = env.total_lent_money;
+    this.average_loan_rate = env.average_loan_rate;
    // this.total_money = total_money_;
 }
 
