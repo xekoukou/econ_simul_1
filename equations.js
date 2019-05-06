@@ -1,10 +1,42 @@
+function assert(b , msg) {
+    if(!b) {
+	throw msg || "Assertion Failed"
+    }
+}
 function rand(width) {
-    return Math.floor(Math.random() * (width + 1));
+    return Math.floor(Math.random() * width);
 }
 
+function rand_except(width , id) {
+    var nid;
+    do {
+	nid = Math.floor(Math.random() * width);
+    } while (nid == id)
+    return nid;
+}
+
+function different_from_all(val , list){
+    var ret = true;
+    list.forEach(function(e) {
+	if(e == val){
+	    ret = false;
+	}
+    });
+    return ret;
+}
+
+function rand_except_list(width , list) {
+    var nid;
+    do {
+	nid = Math.floor(Math.random() * width);
+    } while (!different_from_all(nid, list))
+    return nid;
+}
+
+
 function Opportunity(j , o) {
-    this.jobs = rand(j) ;
-    this.output = rand(o);
+    this.jobs = rand(j) + 1;
+    this.output = rand(o) + 1;
 }
 
 function Dept(id , amount , loan_rate) {
@@ -35,43 +67,61 @@ function Agent(id , money , nl , na) {
     // Ids of the agents that own the company.
     this.known_products = [];
     for (var i = 0; i < nl; i++) {
-	this.known_products.push(rand(na));
+	var nid = rand_except_list(na , this.known_products);
+	this.known_products.push(nid);
     }
     this.known_workplaces = [];
     for (var i = 0; i < nl; i++) {
-	this.known_workplaces.push(rand(na));
+	var nid = rand_except_list(na , this.known_workplaces);
+	this.known_workplaces.push(nid);
     }
     this.known_loan_rates = [];
     for (var i = 0; i < nl; i++) {
-	this.known_loan_rates.push(rand(na));
+	var nid = rand_except_list(na , this.known_loan_rates);
+	this.known_loan_rates.push(nid);
     }
-    this.opportunities = [ new Opportunity(1 , 1) ];
-    this.company = this.opportunities[0];
+    // The order here is important for company_id.
+    this.opportunities = [] ;
+    for (var i = 0; i < nl; i++) {
+	this.opportunities.push(new Opportunity(1 , 1));
+    }
+    this.company_id = 0;
     this.changed_op = 0;
     this.provided_wage = 1;
-    this.product_price = 1;
+    this.product_price = 2;
     this.loan_rate = 1;
     this.production = 0;
     this.jobs_filled = 0;
+    this.workers = [];
     this.units_sold = 0;
     this.company_funded = 0;
 }
 
+function agent_has_produced(agent) {
+    var op = agent.opportunities[agent.company_id];
+    if(agent.company_funded == 1 && agent.jobs_filled == op.jobs){
+	return true;
+    }
+    return false;
+}
+
 function agent_the_profit(agent) {
-    var op = agent.company;
-    var jf = agent.jobs_filled;
-    var prod = agent.production;
+    var op = agent.opportunities[agent.company_id];
     return op.output * agent.product_price - op.jobs * agent.provided_wage;  
 }
 
+function agent_profit(agent) {
+    return agent.units_sold * agent.product_price - agent.jobs_filled * agent.provided_wage;
+}
+
 function agent_adapt(agent) {
-    var op = agent.company;
+    var op = agent.opportunities[agent.company_id];
     var jf = agent.jobs_filled;
-    var prod = agent.production;
-    var th_profit = op.output * agent.product_price - op.jobs * agent.provided_wage;
+    var units_sold = agent.units_sold;
+    var th_profit = agent_the_profit(agent);
     var re_profit;
     if(jf == op.jobs) {
-	re_profit = prod * agent.product_price - jf * agent.provided_wage;
+	re_profit = agent_profit(agent);
     } else {
 	re_profit = 0;
     }
@@ -79,12 +129,15 @@ function agent_adapt(agent) {
     if((th_profit - op.jobs > 0) && (jf < op.jobs)) {
 	agent.provided_wage++;
     }
-    if((jf == op.jobs) && rand(1)) {
+    // No worker will accept a non positive wage.
+    //If there was production , try to opprtunistically reduce the wages.
+    //If not funded , reduce the wage.
+    if((jf == op.jobs && rand(2)) && (agent.provided_wage > 1)) {
 	agent.provided_wage--;
     }
     if ((jf == op.jobs) && (re_profit > agent.prev_prod_profit) && (agent.changed_op == 0)) {
 	if (agent.prev_price_higher == 1) {
-	    if (profit - prod > 0) {
+	    if (re_profit - units_sold > 0) {
 		agent.product_price--;
 		agent.prev_price_higher = 1;
 	    }
@@ -93,12 +146,12 @@ function agent_adapt(agent) {
 	    agent.prev_price_higher = 0;
 	}
     }
-    if ((jf == op.jobs) && (re_profit < agent.prev_prod_profit) && (agent.changed_op == 0)) {
+    if ((jf == op.jobs) && (re_profit <= agent.prev_prod_profit) && (agent.changed_op == 0)) {
 	if (agent.prev_price_higher == 1) {
 	    agent.product_price++;
 	    agent.prev_price_higher = 0;
 	} else {
-	    if (profit - prod > 0) {
+	    if (re_profit - units_sold > 0) {
 		agent.product_price--;
 		agent.prev_price_higher = 1;
 	    }
@@ -111,7 +164,7 @@ function agent_adapt(agent) {
     // Here we might not have enough money to lend if we decrease the rate of profit.
     // See min_money_multi.
     // Since the profits will not rise, the agent will self correct himself.
-    var loan_profit = agent.lent_money * agent.loan_rate;
+    var loan_profit = agent.lent_money * agent.loan_rate / 100;
     if(agent.prev_loan_profit < loan_profit) {
 	if(agent.prev_loan_rate_higher == 1) {
 	    if(agent.loan_rate > 1){
@@ -129,43 +182,118 @@ function agent_adapt(agent) {
 	    }
 	}
     }
+    agent.prev_loan_profit = loan_profit;
 }
 
 // probability of new opportunity is 1 / op_change
-function agent_learn(agent , agents , na , op_chance , jobs_width , output_width , learn_chance) {
-    if(rand(op_chance - 1) == 0) {
-	var nop = new Opportunity(jobs_width , output_width);
+function agent_learn(agent , agents , par) {
+    if(rand(par.op_chance) == 0) {
+	var nop = new Opportunity(par.jobs_width , par.output_width);
+
+        // Add the current company as is.
+	var nops = [];
+	nops.push(agent.opportunities[agent.company_id]);
+	agent.opportunities.splice(agent.company_id , 1);
+	agent.company_id = 0;
+        // Find the best other opportunities.
 	agent.opportunities.push(nop);
+	for(var i = 0 ; i <agent.nl - 1; i++){
+	    var id = agent_find_best_opportunity(agent, []);
+	    nops.push(agent.opportunities[id]);
+	    agent.opportunities.splice(id , 1);
+	}
+	agent.opportunities = nops;
     }
-    if(rand(learn_chance - 1) == 0) {
-	var nw = rand(na);
-	var nag = agents[nw];
-	for (var i = 0; i < agent.nl; i++) {
-	    var other = agent.known_workplaces[i];
-	    if(agents[other].provided_wage < nag.provided_wage) {
-		agent.known_workplaces[i] = nw;
-		nw = other;
+    for(var j = 0; j < par.learn_times; j++) {
+	if(rand(par.learn_chance) == 0) {
+	    var nw = -1;
+	    var nag;
+	    var q = 1000;
+	    do {
+		q--;
+		if(q < 0) {
+		    break;
+		}
+		nw = rand_except(par.na , agent.id);
 		nag = agents[nw];
+	    } while (nag.company_funded == 0 || !different_from_all(nw , agent.known_workplaces))
+	    if(nw != -1) {
+		for (var i = 0; i < agent.nl; i++) {
+		    var other = agent.known_workplaces[i];
+		    
+		    if (agents[other].company_funded == 0) {
+			agent.known_workplaces[i] = nw;
+			//  console.log("I learned a new working place.");
+			break;
+		    }
+		    if(agents[other].provided_wage < nag.provided_wage) {
+			// console.log("I learned a new working place.");
+			agent.known_workplaces[i] = nw;
+			nw = other;
+			nag = agents[nw];
+		    }
+		}
 	    }
-	}
-	var np = rand(na);
-	var nagp = agents[np];
-	for (var i = 0; i < agent.nl; i++) {
-	    var other = agent.known_products[i];
-	    if(agents[other].product_price < nagp.product_price) {
-		agent.known_products[i] = np;
-		np = other;
+	    var np = -1;
+	    var  nagp;
+	    var q = 1000;
+	    do {
+		q--;
+		if(q < 0) {
+		    break;
+		}
+		np = rand_except(par.na , agent.id);
 		nagp = agents[np];
+	    } while (nagp.company_funded == 0 || !different_from_all(np , agent.known_products))
+	    if(np != -1) {
+		for (var i = 0; i < agent.nl; i++) {
+		    var other = agent.known_products[i];
+		    if(agents[other].company_funded == 0) {
+			// console.log("I learned a new product.");
+			agent.known_products[i] = np;
+			break;
+		    }
+		    if(agents[other].product_price > nagp.product_price ) {
+			// console.log("I learned a new product.");
+			agent.known_products[i] = np;
+			np = other;
+			nagp = agents[np];
+		    }
+		}
 	    }
-	}
-	var nr = rand(na);
-	var nagr = agents[nr];
-	for (var i = 0; i < agent.nl; i++) {
-	    var other = agent.known_loan_rates[i];
-	    if(agents[other].loan_rate < nagr.loan_rate) {
-		agent.known_products[i] = nr;
-		nr = other;
+
+	    var nr = -1;
+	    var nagr;
+	    var nmin_money;
+	    var q = 1000;
+	    do {
+		q--;
+		if(q < 0) {
+		    break;
+		}
+		nr = rand_except(par.na , agent.id);
 		nagr = agents[nr];
+		var nop = nagr.opportunities[nagr.company_id]
+		nmin_money = par.min_money_multi * (nop.jobs * nagr.provided_wage);
+	    } while (nagr.money >  nmin_money || !different_from_all(nr , agent.known_loan_rates))
+	    if(nr != -1) {
+		for (var i = 0; i < agent.nl; i++) {
+		    var other = agent.known_loan_rates[i];
+		    var oagent = agents[other];
+		    var onop = oagent.opportunities[nagr.company_id]
+		    onmin_money = par.min_money_multi * (onop.jobs * oagent.provided_wage);
+		    if(oagent.money < onmin_money) {
+			//	    console.log("I learned a new loan rate.");
+			agent.known_loan_rates[i] = nr;
+			break;
+		    }
+		    if(oagent.loan_rate > nagr.loan_rate) {
+			//	    console.log("I learned a new loan rate.");
+			agent.known_loan_rates[i] = nr;
+			nr = other;
+			nagr = agents[nr];
+		    }
+		}
 	    }
 	}
     }
@@ -174,16 +302,18 @@ function agent_learn(agent , agents , na , op_chance , jobs_width , output_width
 function agent_find_cheapest (agent , agents) {
     var id = agent.known_products[0];
     var price = agents[id].product_price;
+    var available = agents[id].production - agents[id].units_sold;
+
     for (var i = 1; i < agent.nl; i++) {
 	var nid = agent.known_products[i];
 	var nprice = agents[nid].product_price;
-	var available = agents[nid].production - agents[nid].units_sold;
-	if ((nprice < price) && (available > 0)) {
+	var navailable = agents[nid].production - agents[nid].units_sold;
+	if ((nprice <= price && navailable > 0) || available <= 0) {
 	    id = nid;
 	    price = nprice;
+            available = navailable;
 	}
     }
-    var available = agents[id].production - agents[id].units_sold;
     if(available > 0) {
 	return id;
     } else {
@@ -191,8 +321,8 @@ function agent_find_cheapest (agent , agents) {
     }
 }
 
-function agent_buy(agent , agents , cwidth) {
-    var con = rand(cwidth);
+function agent_consume(agent , agents , par) {
+    var con = rand(par.cwidth);
     while((agent.money > 0) && (con > 0)) {
 	con--;
 	var id = agent_find_cheapest(agent , agents);
@@ -204,8 +334,10 @@ function agent_buy(agent , agents , cwidth) {
 		return;
 	    } else {
 		agent.money = agent.money - seller.product_price;
+		assert(agent.money >= 0 , "Consumer money should ne non negative.");
 		seller.money = seller.money + seller.product_price;
 		seller.units_sold++;
+		assert(seller.production - seller.units_sold >= 0 , "Units sold should fewer than production.");
 	    }
 	}
     }
@@ -213,40 +345,42 @@ function agent_buy(agent , agents , cwidth) {
 
 // This is based on the current perception of wages and product prices of the agent.
 // Thus the best option depends on the market.
-function agent_pick_best_opportunity(agent) {
+function agent_find_best_opportunity(agent , rejected) {
     var price = agent.product_price;
     var wage = agent.provided_wage;
-    var op = agent.company;
+    var op =  agent.opportunities[agent.company_id];
+    var id = 0;
     var the_profit = op.output * price - op.jobs * wage;
     for (var i = 0; i < agent.opportunities.length; i++) {
 	var nop = agent.opportunities[i];
 	var nprofit = nop.output * price - nop.jobs * wage;
-	if (nprofit > the_profit) {
+	if ((nprofit > the_profit) && (undefined === rejected.find(function(el) {el == i}))) {
 	    op = nop;
 	    the_profit = nprofit;
+	    id = i;
 	}
     }
-    -- inequality
-    if((agent.company.jobs != op.jobs) || (agent.company.output != op.output)){
-	agent.company = op;
-	agent.changed_op = 1;
-    }
+    return id;
 }
 
+
 // The multiplier is used so as to avoid halting the operation of the company by lending money to others.
+// Of course , the op might change for the lender, but at least, he can fund the current one.
 function agent_find_lower_rate (agent , money_needed , agents , min_money_multi) {
     var id = agent.known_loan_rates[0];
     var rate = agents[id].loan_rate;
     for (var i = 1; i < agent.nl; i++) {
 	var nid = agent.known_loan_rates[i];
 	var nrate = agents[nid].loan_rate;
-	min_money = min_money_multi * (agents[nid].company.jobs * agents[nid].provided_wage);
+	var nop = agents[nid].opportunities[agents[nid].company_id]
+	var min_money = min_money_multi * (nop.jobs * agents[nid].provided_wage);
 	if ((nrate < rate) && (agents[nid].money - min_money - money_needed > 0)) {
 	    id = nid;
 	    rate = nrate;
 	}
     }
-    var min_money = min_money_multi * (agents[id].company.jobs * agents[id].provided_wage);
+    var op = agents[id].opportunities[agents[id].company_id]
+    var min_money = min_money_multi * (op.jobs * agents[id].provided_wage);
     if(agents[id].money - min_money - money_needed > 0) {
 	return id;
     } else {
@@ -258,47 +392,70 @@ function agent_find_lower_rate (agent , money_needed , agents , min_money_multi)
 // Here I assume that the lenders give money to everyone that is asking,
 // and that the borrower will pay eveentually all his debt, no defaults are possible.
 // This is to simplify the model.
-function agent_fund_company(agent , agents , min_money_multi) {
+function agent_fund_company(agent , agents , par) {
     agent.company_funded = 0;
+    agent.changed_op = 0;
     if(agent.total_debt > 0) {
 	return;
     }
-    var req = agent.company.jobs * agent.provided_wage;
-    if(agent.money >= req) {
-	agent.company_funded = 1;
-    } else {
-	rem = agent.money - req;
-	id = agent_find_lower_rate (agent , req , agents , min_money_multi);
-	if(id != -1) {
-	    var lender = agents[id];
-            var loan = (lender.loan_rate + 100) * rem / 100
-            if(agent_the_profit(agent) - loan > 0) {
-		agent.company_funded = 1;
-		agent.money = agent.money + rem;
-		agent.total_debt = agent.total_debt + loan;
-		agent.debts.push(new Dept(id , rem , lender.loan_rate));
-		lender.money = lender.money - rem;
-		lender.lent_money = lender.lent_money + rem;
+    var company_id = agent.company_id;
+
+    var rejected = [];
+    do {
+	var op_id = agent_find_best_opportunity(agent , rejected);
+	var op = agent.opportunities[op_id];
+	var req = op.jobs * agent.provided_wage;
+	if(agent.money >= req) {
+	    agent.company_id = op_id;
+	    agent.company_funded = 1;
+	    if(op_id != company_id){
+		agent.changed_op = 1;
+	    }
+	} else {
+	    var rem = req - agent.money;
+	    var lid = agent_find_lower_rate (agent , rem , agents , par.min_money_multi);
+	    if(lid != -1) {
+		var lender = agents[lid];
+		var loan = Math.floor((lender.loan_rate + 100) * rem / 100);
+		if(agent_the_profit(agent) - loan > 0) {
+		    agent.company_id = op_id;
+		    agent.company_funded = 1;
+		    agent.money = agent.money + rem;
+		    agent.total_debt = agent.total_debt + loan;
+		    agent.debts.push(new Dept(lid , rem , lender.loan_rate));
+		    lender.money = lender.money - rem;
+		    assert(lender.money >= 0 , "Lender money non negative");
+		    lender.lent_money = lender.lent_money + rem;
+		    if(lender.company_funded == 1) {
+			assert(lender.money > lender.opportunities[lender.company_id].jobs * lender.provided_wage , "Lender gave more money that he could.")
+		    }
+		    if(op_id != company_id){
+			agent.changed_op = 1;
+		    }
+		}
 	    }
 	}
-    }
+	rejected.push(op_id);
+    } while ((agent.company_funded == 0) && (rejected.length < agent.opportunities.length)) ;
 }
 
-// This should be done before consumption.
+// This should be done after consumption.
 //agent.lent_money is set to zero in every cycle.
 function agent_pay_debt(agent, agents) {
     while ((agent.total_debt != 0) && (agent.money > 0)) {
 	var debt = agent.debts.pop();
 	var lender = agents[debt.id];
-        var loan = (debt.loan_rate + 100) * debt.amount / 100
+        var loan = Math.floor ((debt.loan_rate + 100) * debt.amount / 100)
 	if (agent.money >= loan){
 	    agent.money = agent.money - loan;
-	    agent.total_debt = agent_total_debt - loan;
+	    assert(agent.money >= 0 , "Borrower money non negative");
+	    agent.total_debt = agent.total_debt - loan;
+	    assert(agent.total_debt >= 0 , "Debt should be positive.");
 	    lender.money = lender.money + loan;
 	} else {
 	    var repaid = agent.money;
 	    agent.money = 0;
-	    agent.total_debt = agent_total_debt - repaid;
+	    agent.total_debt = agent.total_debt - repaid;
 	    lender.money = lender.money + repaid;
 	    debt.amount = debt.amount - repaid * 100 / (100 + debt.loan_rate);
 	    agent.debts.push(debt);
@@ -306,189 +463,235 @@ function agent_pay_debt(agent, agents) {
     }
 }
 
-function agent_work(agent , agents) {
+function agent_pick_workplace(agent , agents) {
+    assert(agent.jobs_filled == agent.workers.length , "The workers must equal the jobs filled." + agent.jobs_filled + " " + agent.workers.length);
     var id = agent.known_workplaces[0];
-    var price = agents[id].provided_wage;
+    var wage = agents[id].provided_wage;
     for (var i = 1; i < agent.nl; i++) {
-	var nid = agent.known_products[i];
-	var nprice = agents[nid].product_price;
-	var available = agents[nid].production - agents[nid].units_sold;
-	if ((nprice < price) && (available > 0)) {
+	var nid = agent.known_workplaces[i];
+	var employer = agents[nid];
+	var nwage = employer.provided_wage;
+	var available_jobs = employer.opportunities[employer.company_id].jobs - employer.jobs_filled;
+	if ((nwage < wage) && (employer.company_funded == 1) && (available_jobs > 0)) {
 	    id = nid;
-	    price = nprice;
+	    wage = nwage;
 	}
     }
-    var available = agents[id].production - agents[id].units_sold;
-    if(available > 0) {
-	return id;
-    } else {
-	return -1;
+    var employer = agents[id];
+    var available_jobs = employer.opportunities[employer.company_id].jobs - employer.jobs_filled;
+    if((employer.company_funded == 1) && (available_jobs > 0)) {
+	employer.jobs_filled++;
+	employer.workers.push(agent.id);
     }
 }
 
-function agent_update(agent) {
+function agent_pay_workers(agent , agents) {
+    assert(agent.jobs_filled == agent.workers.length , "The number of jobs filled is not equal to the number of workers employed");
+    while(agent.workers.length > 0) {
+	assert(agent.company_funded == 1 , "To have workers, you must be funded.");
+	var worker = agents[agent.workers.pop()];
+	worker.money = worker.money + agent.provided_wage;
+	agent.money = agent.money - agent.provided_wage;
+	assert(agent.money >= 0 , "Employer money should be non negative");
+    }
+}
+function agent_produce(agent , agents) {
+    var op = agent.opportunities[agent.company_id];
+    if((agent.company_funded == 1) && (agent.jobs_filled == op.jobs)) {
+	agent.production = op.output;
+	agent_pay_workers(agent , agents);
+    }
+}
+
+// This needs to be done after adaptation and after production, cosmuption.
+function agent_after_adapt(agent , agents) {
+    agent.units_sold = 0;
+    agent.lent_money = 0;
+    agent.production = 0;
+    agent.jobs_filled = 0;
+    agent.workers = [];
+}
+
+
+function fill_with_ids (na) {
+    var output = [];
+    for (var i = 0; i < na; i++) {
+	output.push(i);
+    }
+    return output;
+}
+
+//picks random id an removes it from the list.
+function pick_rand_id (ids) {
+    var length = ids.length;
+    var i = rand(length);
+    var id = ids[i];
+    ids.splice(i , 1);
+    return id;
+}
+
+function perform_action(agents , action , par){
+    var ids = fill_with_ids(agents.length);
+    while(ids.length > 0) {
+	var id = pick_rand_id(ids);
+	var agent = agents[id];
+	action(agent , agents , par);
+    }
+}
+
+function Par(){
+    this.nl = 20;
+    this.na = 1000;
+    this.money = 1000;
+    this.op_chance = 10000;
+    this.jobs_width = 5;
+    this.output_width = 5;
+    this.learn_chance = 2;
+    this.learn_times = 5;
+    this.cwidth = 5;
+    this.min_money_multi = 5;
+    
 }
 
 function Environment(){
-    var na = 1000;
-    var money = 2000;
-    this.na = na;
+    this.par = new Par();
     this.agents = [];
-    for (var i = 0; i < na; i++) {
-	this.agents.push(new Agent(i , money));
+    for (var i = 0; i < this.par.na; i++) {
+	this.agents.push(new Agent(i , this.par.money , this.par.nl , this.par.na));
     }
-    this.s = 1;
+    this.total_production = 0;
+    this.total_sales = 0;
+    this.average_price = 0;
+    this.average_wage = 0;
+    this.employment = 0;
+    this.total_money = this.par.na * this.par.money;
+}
+
+function compute_total_production(agents) {
+    var production = 0;
+    agents.forEach(function(agent){
+	production = production + agent.production;
+    });
+    return production;
+}
+
+function compute_total_sales(agents) {
+    var sales = 0;
+    agents.forEach(function(agent){
+	sales = sales + agent.units_sold;
+    });
+    return sales;
+}
+
+function compute_employment(agents) {
+    var n = 0;
+    agents.forEach(function(agent){
+	if(agent_has_produced(agent)) {
+	    n = n + agent.jobs_filled;
+	}
+    });
+    return n;
+}
+
+function compute_average_profit(agents) {
+    var profit = 0;
+    agents.forEach(function(agent){
+	if(agent_has_produced(agent)) {
+	    profit = profit + agent_profit(agent)
+	}
+    });
+}
+function compute_average_wage(agents , employment , prev_wage) {
+    if(employment == 0){
+	return prev_wage;
+    }
+    var wage = 0;
+    agents.forEach(function(agent){
+	if(agent_has_produced(agent)) {
+	    wage = wage + agent.jobs_filled * agent.provided_wage;
+	}
+    });
+    return wage / employment;
 }
 
 
-function equation(t, env, graphs_all) {
-    env.s = env.s + 1;
+function compute_average_price(agents , total_sales , prev_price) {
+    if(total_sales == 0){
+	return prev_price;
+    }
+    var price = 0;
+    agents.forEach(function(agent){
+	price = price + agent.units_sold * agent.product_price;
+    });
+    return price / total_sales;
 }
 
-function Person(id, birth_year) {
-    this.clone = true;
-    this.x = Math.floor(Math.random() * 101);
-    this.y = Math.floor(Math.random() * 101);
-    this.size = 2;
-    this.color = '#f00';
-    this.id = "" + id;
-    this.birth_year = birth_year;
-    this.gender = (Math.floor(Math.random() * 2) == 1) ? "male" : "female";
-    this.children = [];
-    this.parents = []
-    this.married = false;
-    this.second_half;
+function compute_total_money(agents) {
+    var money = 0;
+    agents.forEach(function(agent){
+	money = money + agent.money;
+    });
+    return money;
 }
 
-function Env() {
-    var people = [];
-    people.push(new Person(1, 0));
-    people.push(new Person(2, 0));
-    people.push(new Person(3, 0));
-    people.push(new Person(4, 0));
-    people.push(new Person(5, 0));
 
+function equation(t, env) {
+    perform_action(env.agents , agent_fund_company , env.par);
+    perform_action(env.agents , agent_pick_workplace , env.par);
+    perform_action(env.agents , agent_produce , env.par);
+    perform_action(env.agents , agent_consume , env.par);
 
-    this.next_id = 6;
-    this.people = people;
-    this.not_married_male = [];
-    this.not_married_female = [];
-    this.married_female = [];
-    this.young = people.slice();
-    this.number_young = 5;
-    this.number_married = 0;
-    this.population = 5;
+    env.total_production = compute_total_production(env.agents);
+    env.total_sales = compute_total_sales(env.agents);
+    env.employment = compute_employment(env.agents);
+    env.average_price = compute_average_price(env.agents , env.total_sales , env.average_price);
+    env.average_wage = compute_average_wage(env.agents , env.employment , env.average_wage);
+
+    perform_action(env.agents , agent_pay_debt , env.par);
+    perform_action(env.agents , agent_adapt , env.par);
+    perform_action(env.agents , agent_learn , env.par);
+    perform_action(env.agents , agent_after_adapt , env.par);
+
+    assert(env.total_sales <= env.total_production , "The total sales should be smaller that total production.");
+    assert(compute_total_money(env.agents) == env.total_money , "The total amount of money has changed.");
+  //  env.total_money = compute_total_money(env.agents);
 }
 
-function population(t, values, graphs_all) {
-    var not_married_male = values["not_married_male"];
-    var not_married_female = values["not_married_female"];
-    var married_female = values["married_female"];
-    var people = values["people"];
-    var young = values["young"];
+function Result(env) {
+    this.total_production = env.total_production;
+    this.total_sales = env.total_sales;
+    this.average_price = env.average_price;
+    this.employment = env.employment;
+    this.average_wage = env.average_wage;
+   // this.total_money = total_money_;
+}
 
- //   var graph = graphs_all["graph_id"].graph;
+var time;
+var prev_time;
+var env;
+var sample_rate;
 
-    //Every month, 1/100 chance to marry a woman.
-    var i = 0;
-    while (i < not_married_male.length) {
-        var man = not_married_male[i];
-        var will_be_married = (Math.floor(Math.random() * 101) == 1) ? true : false;
-
-        if (will_be_married && not_married_female.length > 0) {
-            var woman;
-            var w_i = Math.floor(Math.random() * not_married_female.length - 1 + 1);
-            woman = not_married_female[w_i];
-            if (woman.married == true) {
-                console.log("Error");
-            }
-
-            not_married_male = not_married_male.splice(i, 1);
-            not_married_female = not_married_female.splice(w_i, 1);
-            man.married = true;
-            man.second_half = woman;
-            woman.married = true;
-            woman.second_half = man;
-            values.number_married += 2;
-            married_female.push(woman);
-      //      graph.addEdge({
-      //          "id": "" + values.next_id,
-      //          "source": woman.id,
-      //          "target": man.id
-      //      });
-            values.next_id++;
-        } else {
-            i++;
+onmessage = function(e) {
+    if(e.data.option == 'more') {
+        while (time < sample_rate + prev_time) {
+            equation(time, env);
+            time++;
         }
+	prev_time = sample_rate + prev_time;
+
+	postMessage(new Result(env)); // , env.total_money));
+    }
+    if(e.data.option == 'reset') {
+	time = 0;
+	prev_time = 0;
+	env = new Environment();
+    }
+    if(e.data.option == 'start') {
+	time = 0;
+	prev_time = 0;
+	env = new Environment();
+	sample_rate = e.data.sample_rate;
     }
 
-    //Every month, 1/1000 chance to have a child.
-    for (var i = 0; i < married_female.length; i++) {
-        var woman = married_female[i];
-
-        var will_have_child = (Math.floor(Math.random() * 1001) == 1) ? true : false;
-        if (will_have_child) {
-            var child = new Person(values.next_id, t);
-            values.next_id++;
-            values.number_young++;
-            people.push(child);
-            young.push(child);
-            child.parents.push(woman);
-            child.parents.push(woman.second_half);
-            woman.second_half.children.push(child);
-            values.population++;
-            if (woman.children.length > 0) {
-                child.group = woman.children[0].group;
-            } else {
-                while (true) {
-                    var group = Math.floor(Math.random() * 21);
-                    if (group != woman.group && group != woman.second_half.group) {
-                        child.group = group;
-                        break;
-                    }
-                }
-            }
-            woman.children.push(child);
-
-        //    graph.addNode(child);
-        //    graph.addEdge({
-        //        "id": "" + values.next_id,
-        //        "source": woman.id,
-        //        "target": child.id
-        //    });
-            values.next_id++;
-        //    graph.addEdge({
-        //        "id": "" + values.next_id,
-        //        "source": woman.second_half.id,
-        //        "target": child.id
-        //    });
-            values.next_id++;
-
-        }
-    }
-
-
-    while (young.length > 0) {
-        var person = young.shift();
-        if (t - person.birth_year > 18) {
-            values.number_young--;
-            if (person.gender == "male") {
-                not_married_male.push(person);
-            } else {
-                not_married_female.push(person);
-            }
-        } else {
-            young.unshift(person);
-            break;
-        }
-    }
 
 }
-
-var simulation = new Simulation(
-    Environment , [
-        ["time","s", "test_id", 900, 400],
-        ["s","s", "test_id2", 900, 400]
-    ], [
-        // ["graph_id", 1200, 800, "people", null]
-    ], equation , 10 , 100);
