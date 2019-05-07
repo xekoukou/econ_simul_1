@@ -64,20 +64,9 @@ function Agent(id , money , nl , na) {
     this.prev_loan_rate_higher = 0;
     // Ids of the agents that own the company.
     this.known_products = [];
-    for (var i = 0; i < nl; i++) {
-	var nid = rand_except_list(na , this.known_products);
-	this.known_products.push(nid);
-    }
     this.known_workplaces = [];
-    for (var i = 0; i < nl; i++) {
-	var nid = rand_except_list(na , this.known_workplaces);
-	this.known_workplaces.push(nid);
-    }
     this.known_loan_rates = [];
-    for (var i = 0; i < nl; i++) {
-	var nid = rand_except_list(na , this.known_loan_rates);
-	this.known_loan_rates.push(nid);
-    }
+
     // The order here is important for company_id.
     this.opportunities = [] ;
     for (var i = 0; i < nl; i++) {
@@ -207,7 +196,7 @@ function agent_adapt(agent) {
 }
 
 // probability of new opportunity is 1 / op_change
-function agent_learn(agent , agents , par) {
+function agent_learn_opportunity(agent , agents , par) {
     if(rand(par.op_chance) == 0) {
 	var nop = new Opportunity(par.jobs_width , par.output_width);
 
@@ -218,114 +207,88 @@ function agent_learn(agent , agents , par) {
 	agent.company_id = 0;
         // Find the best other opportunities.
 	agent.opportunities.push(nop);
-	for(var i = 0 ; i <agent.nl - 1; i++){
+	for(var i = 0 ; i < agent.nl - 1; i++){
 	    var id = agent_find_best_opportunity(agent, []);
 	    nops.push(agent.opportunities[id]);
 	    agent.opportunities.splice(id , 1);
 	}
 	agent.opportunities = nops;
     }
-    for(var j = 0; j < par.learn_times; j++) {
-	if(rand(par.learn_chance) == 0) {
-	    var nw = -1;
-	    var nag;
-	    var q = 1000;
-	    do {
-		q--;
-		if(q < 0) {
-		    break;
-		}
-		nw = rand_except(par.na , agent.id);
-		nag = agents[nw];
-	    } while (nag.company_funded == 0 || !different_from_all(nw , agent.known_workplaces))
-	    if(nw != -1) {
-		for (var i = 0; i < agent.nl; i++) {
-		    var other = agent.known_workplaces[i];
-		    
-		    if (agents[other].company_funded == 0) {
-			agent.known_workplaces[i] = nw;
-			//  console.log("I learned a new working place.");
-			break;
-		    }
-		    if(agents[other].provided_wage < nag.provided_wage) {
-			// console.log("I learned a new working place.");
-			agent.known_workplaces[i] = nw;
-			nw = other;
-			nag = agents[nw];
-		    }
-		}
-	    }
-	    var np = -1;
-	    var  nagp;
-	    var q = 1000;
-	    do {
-		q--;
-		if(q < 0) {
-		    break;
-		}
-		np = rand_except(par.na , agent.id);
-		nagp = agents[np];
-	    } while (!agent_has_produced(nagp) || !different_from_all(np , agent.known_products))
-	    if(np != -1) {
-		for (var i = 0; i < agent.nl; i++) {
-		    var other = agent.known_products[i];
-		    if(agents[other].company_funded == 0) {
-			// console.log("I learned a new product.");
-			agent.known_products[i] = np;
-			break;
-		    }
-		    if(agents[other].product_price > nagp.product_price ) {
-			// console.log("I learned a new product.");
-			agent.known_products[i] = np;
-			np = other;
-			nagp = agents[np];
-		    }
-		}
-	    }
+}
 
-	    var nr = -1;
-	    var nagr;
-	    var nmin_money;
-	    var q = 1000;
-	    do {
-		q--;
-		if(q < 0) {
-		    break;
-		}
-		nr = rand_except(par.na , agent.id);
-		nagr = agents[nr];
-		var nop = nagr.opportunities[nagr.company_id]
-		nmin_money = par.min_money_multi * (nop.jobs * nagr.provided_wage);
-	    } while (nagr.money >  nmin_money || !different_from_all(nr , agent.known_loan_rates))
-	    if(nr != -1) {
-		for (var i = 0; i < agent.nl; i++) {
-		    var other = agent.known_loan_rates[i];
-		    var oagent = agents[other];
-		    var onop = oagent.opportunities[nagr.company_id]
-		    onmin_money = par.min_money_multi * (onop.jobs * oagent.provided_wage);
-		    if(oagent.money < onmin_money) {
-			//	    console.log("I learned a new loan rate.");
-			agent.known_loan_rates[i] = nr;
-			break;
-		    }
-		    if(oagent.loan_rate > nagr.loan_rate) {
-			//	    console.log("I learned a new loan rate.");
-			agent.known_loan_rates[i] = nr;
-			nr = other;
-			nagr = agents[nr];
-		    }
-		}
+function agent_learn_workplaces(agent , agents , par) {
+    agent.known_workplaces = [];
+    for(var j = 0; j < agent.nl; j++) {
+	var nw = -1;
+	var nag;
+	var q = 1000;
+	do {
+	    q--;
+	    if(q < 0) {
+		break;
 	    }
+	    nw = rand_except(par.na , agent.id);
+	    nag = agents[nw];
+	} while (nag.company_funded == 0 || !different_from_all(nw , agent.known_workplaces))
+	if(nw != -1) {
+	    agent.known_workplaces.push(nw);
 	}
     }
 }
+
+
+function agent_learn_products(agent , agents , par) {
+    agent.known_products = [];
+    for(var j = 0; j < agent.nl; j++) {
+	var np = -1;
+	var  nagp;
+	var q = 1000;
+	do {
+	    q--;
+	    if(q < 0) {
+		    break;
+	    }
+	    np = rand_except(par.na , agent.id);
+	    nagp = agents[np];
+	} while (!agent_has_produced(nagp) || !different_from_all(np , agent.known_products))
+	if(np != -1) {
+	    agent.known_products.push(np);
+	}
+    }
+}
+
+
+function agent_learn_loan_rates(agent , agents , par) {
+    agent.known_loan_rates = [];
+    for(var j = 0; j < agent.nl; j++) {
+	var nr = -1;
+	    var nagr;
+	var nmin_money;
+	var q = 1000;
+	do {
+	    q--;
+	    if(q < 0) {
+		break;
+	    }
+	    nr = rand_except(par.na , agent.id);
+	    nagr = agents[nr];
+	    var nop = nagr.opportunities[nagr.company_id]
+	    nmin_money = par.min_money_multi * (nop.jobs * nagr.provided_wage);
+	} while (nagr.money >  nmin_money || !different_from_all(nr , agent.known_loan_rates))
+	if(nr != -1) {
+	    agent.known_loan_rates.push(nr);
+	}
+    }
+}
+
+
 
 function agent_find_cheapest (agent , agents) {
     var id = agent.known_products[0];
     var price = agents[id].product_price;
     var available = agents[id].production - agents[id].units_sold;
 
-    for (var i = 1; i < agent.nl; i++) {
+    for (var i = 1; i < agent.known_products.length ; i++) {
 	var nid = agent.known_products[i];
 	var nprice = agents[nid].product_price;
 	var navailable = agents[nid].production - agents[nid].units_sold;
@@ -390,7 +353,7 @@ function agent_find_best_opportunity(agent , rejected) {
 function agent_find_lower_rate (agent , money_needed , agents , min_money_multi) {
     var id = agent.known_loan_rates[0];
     var rate = agents[id].loan_rate;
-    for (var i = 1; i < agent.nl; i++) {
+    for (var i = 1; i < agent.known_loan_rates.length ; i++) {
 	var nid = agent.known_loan_rates[i];
 	var nrate = agents[nid].loan_rate;
 	var nop = agents[nid].opportunities[agents[nid].company_id]
@@ -484,7 +447,7 @@ function agent_pick_workplace(agent , agents) {
     assert(agent.jobs_filled == agent.workers.length , "The workers must equal the jobs filled." + agent.jobs_filled + " " + agent.workers.length);
     var id = agent.known_workplaces[0];
     var wage = agents[id].provided_wage;
-    for (var i = 1; i < agent.nl; i++) {
+    for (var i = 1; i < agent.known_workplaces.length ; i++) {
 	var nid = agent.known_workplaces[i];
 	var employer = agents[nid];
 	var nwage = employer.provided_wage;
@@ -563,8 +526,6 @@ function Par(){
     this.op_chance = 10000;
     this.jobs_width = 10;
     this.output_width = 10;
-    this.learn_chance = 2;
-    this.learn_times = 20;
     this.cwidth = 10;
     this.min_money_multi = 5;
     this.taxation_rate = 50;
@@ -588,6 +549,9 @@ function Environment(){
 }
 
 function taxation(agents , taxation_rate) {
+    if(taxation_rate == 0) {
+	return 0;
+    }
     var money = 0;
     agents.forEach(function(agent){
 	var taxes = Math.floor (agent.money * (taxation_rate / 100));
@@ -598,6 +562,9 @@ function taxation(agents , taxation_rate) {
 }
 
 function redistribution(agents , taxes) {
+    if(taxes == 0) {
+	return;
+    }
     var amount = Math.floor (taxes / agents.length);
     if (amount * agents.length != taxes) {
 	var id = rand(agents.length);
@@ -708,9 +675,13 @@ function compute_total_money(agents) {
 
 
 function equation(t, env) {
+    perform_action(env.agents , agent_learn_opportunity , env.par);
+    perform_action(env.agents , agent_learn_loan_rates , env.par);
     perform_action(env.agents , agent_fund_company , env.par);
+    perform_action(env.agents , agent_learn_workplaces , env.par);
     perform_action(env.agents , agent_pick_workplace , env.par);
     perform_action(env.agents , agent_produce , env.par);
+    perform_action(env.agents , agent_learn_products , env.par);
     perform_action(env.agents , agent_consume , env.par);
 
     env.total_production = compute_total_production(env.agents);
@@ -727,7 +698,6 @@ function equation(t, env) {
     
     perform_action(env.agents , agent_pay_debt , env.par);
     perform_action(env.agents , agent_adapt , env.par);
-    perform_action(env.agents , agent_learn , env.par);
     perform_action(env.agents , agent_after_adapt , env.par);
 
 
