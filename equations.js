@@ -556,7 +556,7 @@ function Environment(){
     this.average_loan_rate = 0;
     this.total_lent_money = 0;
     this.companies = 0;
-    this.average_profitaverage_profit = 0;
+    this.average_profit = 0;
     this.total_money = this.par.na * this.par.money;
 }
 
