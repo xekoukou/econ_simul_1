@@ -54,6 +54,7 @@ function Agent(id , money , nl , na) {
     this.money = money;
     this.prev_prod_profit = 0;
     this.prev_loan_profit = 0;
+    this.average_consumer_price = 0;
     this.debts = [];
     // The amount of money he has lent to others.
     // This is to be set to zero every turn before new lending happens because we use it to
@@ -70,11 +71,11 @@ function Agent(id , money , nl , na) {
     // The order here is important for company_id.
     this.opportunities = [] ;
     for (var i = 0; i < nl; i++) {
-	this.opportunities.push(new Opportunity(1 , 1));
+	this.opportunities.push(new Opportunity(1 , 4));
     }
     this.company_id = 0;
     this.changed_op = 0;
-    this.provided_wage = 1;
+    this.provided_wage = 5;
     this.product_price = 2;
     this.loan_rate = 1;
     this.production = 0;
@@ -238,6 +239,8 @@ function agent_learn_workplaces(agent , agents , par) {
 
 
 function agent_learn_products(agent , agents , par) {
+    var price = 0;
+    var times = 0;
     agent.known_products = [];
     for(var j = 0; j < agent.nl; j++) {
 	var np = -1;
@@ -252,9 +255,12 @@ function agent_learn_products(agent , agents , par) {
 	    nagp = agents[np];
 	} while (!agent_has_produced(nagp) || !different_from_all(np , agent.known_products))
 	if(np != -1) {
+	    times++;
+	    price += agents[np].product_price;
 	    agent.known_products.push(np);
 	}
     }
+    agent.average_consumer_price = price / times;
 }
 
 
@@ -443,7 +449,7 @@ function agent_pay_debt(agent, agents) {
     }
 }
 
-function agent_pick_workplace(agent , agents) {
+function agent_pick_workplace(agent , agents , par) {
     assert(agent.jobs_filled == agent.workers.length , "The workers must equal the jobs filled." + agent.jobs_filled + " " + agent.workers.length);
     var id = agent.known_workplaces[0];
     var wage = agents[id].provided_wage;
@@ -459,7 +465,8 @@ function agent_pick_workplace(agent , agents) {
     }
     var employer = agents[id];
     var available_jobs = employer.opportunities[employer.company_id].jobs - employer.jobs_filled;
-    if((employer.company_funded == 1) && (available_jobs > 0)) {
+    var min_wage = par.min_consumption * agent.average_consumer_price;
+    if((employer.company_funded == 1) && (available_jobs > 0) && (employer.provided_wage > min_wage)) {
 	employer.jobs_filled++;
 	employer.workers.push(agent.id);
     }
@@ -523,10 +530,13 @@ function Par(){
     this.nl = 10;
     this.na = 1000;
     this.money = 10000;
-    this.op_chance = 10000;
+    this.op_chance = 1000;
     this.jobs_width = 10;
-    this.output_width = 10;
-    this.cwidth = 10;
+    this.output_width = 20;
+    this.cwidth = 1000;
+    //required to replenish labor power.
+    //It is used when looking for work.
+    this.min_consumption = 2;
     this.min_money_multi = 5;
     this.taxation_rate = 50;
     
@@ -544,7 +554,9 @@ function Environment(){
     this.average_wage = 0;
     this.employment = 0;
     this.average_loan_rate = 0;
-    this._total_lent_money = 0;
+    this.total_lent_money = 0;
+    this.companies = 0;
+    this.average_profitaverage_profit = 0;
     this.total_money = this.par.na * this.par.money;
 }
 
@@ -674,6 +686,31 @@ function compute_total_money(agents) {
 }
 
 
+function compute_number_of_companies(agents) {
+    var companies = 0;
+    agents.forEach(function(agent){
+	if(agent_has_produced(agent)){
+	    companies++;
+	}
+    });
+    return companies;
+}
+
+
+function compute_average_profit(agents , companies) {
+    if(companies == 0){
+	return 0;
+    }
+
+    var profit = 0;
+    agents.forEach(function(agent){
+	if(agent_has_produced(agent)){
+	    profit = profit + agent_profit(agent);
+	}
+    });
+    return profit / companies;
+}
+
 function equation(t, env) {
     perform_action(env.agents , agent_learn_opportunity , env.par);
     perform_action(env.agents , agent_learn_loan_rates , env.par);
@@ -687,6 +724,8 @@ function equation(t, env) {
     env.total_production = compute_total_production(env.agents);
     env.total_sales = compute_total_sales(env.agents);
     env.employment = compute_employment(env.agents);
+    env.companies = compute_number_of_companies(env.agents);
+    env.average_profit = compute_average_profit(env.agents, env.companies);
     env.total_lent_money = compute_total_lent_money(env.agents);
     env.average_price = compute_average_price(env.agents , env.total_sales , env.average_price);
     env.average_wage = compute_average_wage(env.agents , env.employment , env.average_wage);
@@ -715,6 +754,8 @@ function Result(env) {
     this.average_wage = env.average_wage;
     this.total_lent_money = env.total_lent_money;
     this.average_loan_rate = env.average_loan_rate;
+    this.companies = env.companies;
+    this.average_profit = env.average_profit;
    // this.total_money = total_money_;
 }
 
