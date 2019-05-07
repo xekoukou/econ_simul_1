@@ -133,18 +133,22 @@ function agent_adapt(agent) {
 	    var	re_profit = agent_profit(agent);
 
 	    if(agent.prev_price_higher == -1 || agent.changed_op == 1){
-		if(rand(2)){
+		if(rand(2) && agent.product_price > 1){
+		    agent.product_price--;
+		    agent.prev_price_higher = 1;
+		} else {
 		    agent.product_price++;
 		    agent.prev_price_higher = 0;
-		} else {
-		    agent.product_price--;
-			agent.prev_price_higher = 1;
 		}
 	    } else {
 		
 		if (re_profit > agent.prev_prod_profit) {
 		    if (agent.prev_price_higher == 1) {
-			agent.product_price--;
+			if(agent.product_price > 1){
+			    agent.product_price--;
+			} else {
+			    agent.prev_price_higher = -1;
+			}
 		    } else {
 			agent.product_price++;
 		    }
@@ -154,8 +158,12 @@ function agent_adapt(agent) {
 			agent.product_price++;
 			agent.prev_price_higher = 0;
 		    } else {
-			agent.product_price--;
-			agent.prev_price_higher = 1;
+			if(agent.product_price > 1){
+			    agent.product_price--;
+			    agent.prev_price_higher = 1;
+			} else {
+			    agent.prev_price_higher = -1;
+			}
 		    }
 		}
 
@@ -257,7 +265,7 @@ function agent_learn(agent , agents , par) {
 		}
 		np = rand_except(par.na , agent.id);
 		nagp = agents[np];
-	    } while (nagp.company_funded == 0 || !different_from_all(np , agent.known_products))
+	    } while (!agent_has_produced(nagp) || !different_from_all(np , agent.known_products))
 	    if(np != -1) {
 		for (var i = 0; i < agent.nl; i++) {
 		    var other = agent.known_products[i];
@@ -549,16 +557,17 @@ function perform_action(agents , action , par){
 }
 
 function Par(){
-    this.nl = 20;
+    this.nl = 10;
     this.na = 1000;
-    this.money = 1000;
+    this.money = 10000;
     this.op_chance = 10000;
     this.jobs_width = 10;
-    this.output_width = 2;
+    this.output_width = 10;
     this.learn_chance = 2;
-    this.learn_times = 5;
+    this.learn_times = 20;
     this.cwidth = 10;
     this.min_money_multi = 5;
+    this.taxation_rate = 50;
     
 }
 
@@ -577,6 +586,28 @@ function Environment(){
     this._total_lent_money = 0;
     this.total_money = this.par.na * this.par.money;
 }
+
+function taxation(agents , taxation_rate) {
+    var money = 0;
+    agents.forEach(function(agent){
+	var taxes = Math.floor (agent.money * (taxation_rate / 100));
+	agent.money = agent.money - taxes;
+	money = money + taxes;
+    });
+    return money;
+}
+
+function redistribution(agents , taxes) {
+    var amount = Math.floor (taxes / agents.length);
+    if (amount * agents.length != taxes) {
+	var id = rand(agents.length);
+	agents[id].money += taxes - amount * agents.length;
+    }
+    agents.forEach(function(agent){
+	agent.money = agent.money + amount;
+    });
+}
+
 
 function compute_total_production(agents) {
     var production = 0;
@@ -690,12 +721,18 @@ function equation(t, env) {
     env.average_wage = compute_average_wage(env.agents , env.employment , env.average_wage);
     env.average_loan_rate = compute_average_loan_rate(env.agents , env.total_lent_money , env.average_loan_rate);
 
+
+    var taxes = taxation(env.agents ,env.par.taxation_rate);
+    redistribution(env.agents , taxes);
+    
     perform_action(env.agents , agent_pay_debt , env.par);
     perform_action(env.agents , agent_adapt , env.par);
     perform_action(env.agents , agent_learn , env.par);
     perform_action(env.agents , agent_after_adapt , env.par);
 
+
     assert(env.total_sales <= env.total_production , "The total sales should be smaller that total production.");
+    var b = compute_total_money(env.agents);
     assert(compute_total_money(env.agents) == env.total_money , "The total amount of money has changed.");
   //  env.total_money = compute_total_money(env.agents);
 }
