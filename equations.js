@@ -39,6 +39,13 @@ function Opportunity(j , o) {
     this.output = rand(o) + 1;
 }
 
+function fixed_op(j , o) {
+    var op = new Opportunity(1 , 1);
+    op.jobs = j;
+    op.output = o;
+    return op;
+}
+
 function Dept(id , amount , loan_rate) {
     this.id = id;
     this.amount = amount;
@@ -54,7 +61,8 @@ function Agent(id , money , nl , na) {
     this.money = money;
     this.prev_prod_profit = 0;
     this.prev_loan_profit = 0;
-    this.average_consumer_price = 0;
+    this.average_product_price = 0;
+    this.average_wage = 0;
     this.debts = [];
     // The amount of money he has lent to others.
     // This is to be set to zero every turn before new lending happens because we use it to
@@ -71,11 +79,11 @@ function Agent(id , money , nl , na) {
     // The order here is important for company_id.
     this.opportunities = [] ;
     for (var i = 0; i < nl; i++) {
-	this.opportunities.push(new Opportunity(1 , 4));
+	this.opportunities.push(fixed_op(2 , 10));
     }
     this.company_id = 0;
     this.changed_op = 0;
-    this.provided_wage = 5;
+    this.provided_wage = 8;
     this.product_price = 2;
     this.loan_rate = 1;
     this.production = 0;
@@ -102,28 +110,36 @@ function agent_profit(agent) {
     return agent.units_sold * agent.product_price - agent.jobs_filled * agent.provided_wage;
 }
 
-function agent_adapt(agent) {
+
+function agent_adapt_prices(agent) {
     var op = agent.opportunities[agent.company_id];
     var th_profit = agent_the_profit(agent);
+    assert(th_profit > 0 , "we changed the prices to have a negative theoretical profit.");
 
-    // Not funded means that the agent does not have any money to fund it.
-    //Reduce wages.
-    if(agent.company_funded == 0 && agent.provided_wage > 1){
-	agent.provided_wage--;
+
+    if(agent.company_funded == 0) {
+	agent.prev_prod_profit = 0;
     }
 
     if(agent.company_funded == 1) {
 	
+	if((agent.jobs_filled < op.jobs)) {
+	    agent.prev_prod_profit = 0;
 	// If there is a theoretical profit , but not enough workers , increase wage.
-	if((th_profit - agent.jobs_filled > 0) && (agent.jobs_filled < op.jobs)) {
-	    agent.provided_wage++;
+	    if(th_profit - op.jobs > 0) {
+		agent.provided_wage++;
+	    } else {
+		agent.provided_wage++;
+		agent.product_price += Math.floor ((op.jobs / op.output) + 1) ;
+	    }
 	}
 	
 	if(agent.jobs_filled == op.jobs) {
 	    var	re_profit = agent_profit(agent);
 
+	    // profit cannot be used to determine the price changes , thus we pick randomly.
 	    if(agent.prev_price_higher == -1 || agent.changed_op == 1){
-		if(rand(2) && agent.product_price > 1){
+		if(rand(2) && agent.product_price > 1 && th_profit - op.output > 0){
 		    agent.product_price--;
 		    agent.prev_price_higher = 1;
 		} else {
@@ -134,7 +150,7 @@ function agent_adapt(agent) {
 		
 		if (re_profit > agent.prev_prod_profit) {
 		    if (agent.prev_price_higher == 1) {
-			if(agent.product_price > 1){
+			if(agent.product_price > 1 && th_profit - op.output > 0){
 			    agent.product_price--;
 			} else {
 			    agent.prev_price_higher = -1;
@@ -148,7 +164,7 @@ function agent_adapt(agent) {
 			agent.product_price++;
 			agent.prev_price_higher = 0;
 		    } else {
-			if(agent.product_price > 1){
+			if(agent.product_price > 1 && th_profit - op.output > 0){
 			    agent.product_price--;
 			    agent.prev_price_higher = 1;
 			} else {
@@ -156,8 +172,9 @@ function agent_adapt(agent) {
 			}
 		    }
 		}
-
-		if(rand(2)) {
+		// We randomly try to change wages. That should not result
+		// in the company being closed all the time due to lack of workers.
+		if(rand(100)) {
 		    // Reduce the wage
 		    if(agent.provided_wage > 1) {
 			agent.provided_wage--;
@@ -168,56 +185,81 @@ function agent_adapt(agent) {
 	    // Update the previous profit variable.
 	    agent.prev_prod_profit = re_profit;
 	}
-    } else {
-	agent.prev_prod_profit = 0;
     }
+}
+
+function agent_adapt_loan_rate(agent) {
 
     // Interest rate policy
     var loan_profit = agent.lent_money * agent.loan_rate / 100;
-    if(agent.prev_loan_profit < loan_profit) {
-	if(agent.prev_loan_rate_higher == 1) {
-	    if(agent.loan_rate > 1){
-		agent.loan_rate--;
-	    }
+    
+    if(agent.prev_loan_rate_higher == -1){
+	if(rand(2) && agent.loan_rate > 1){
+	    agent.loan_rate--;
 	} else {
 	    agent.loan_rate++;
 	}
     } else {
-	if(agent.prev_loan_rate_higher == 1) {
-	    agent.loan_rate++;
-	    agent.prev_loan_rate_higher = 0;
+	
+	if(agent.prev_loan_profit < loan_profit) {
+	    if(agent.prev_loan_rate_higher == 1) {
+		if(agent.loan_rate > 1){
+		    agent.loan_rate--;
+		} else {
+		    agent.prev_loan_rate_higher = -1;
+		}
+	    } else {
+		agent.loan_rate++;
+	    }
 	} else {
-	    if(agent.loan_rate > 1){
-		agent.loan_rate--;
-		agent.prev_loan_rate_higher = 1;
+	    if(agent.prev_loan_rate_higher == 1) {
+		agent.loan_rate++;
+		agent.prev_loan_rate_higher = 0;
+	    } else {
+		if(agent.loan_rate > 1){
+		    agent.loan_rate--;
+		    agent.prev_loan_rate_higher = 1;
+		} else {
+		    agent.prev_loan_rate_higher = -1;
+		}
 	    }
 	}
     }
+    
     agent.prev_loan_profit = loan_profit;
 }
 
-// probability of new opportunity is 1 / op_change
+
 function agent_learn_opportunity(agent , agents , par) {
+    if(par.op_chance == -1){
+	return;
+    }
+
     if(rand(par.op_chance) == 0) {
 	var nop = new Opportunity(par.jobs_width , par.output_width);
-
-        // Add the current company as is.
 	var nops = [];
+	// We need to maintain the op of the company we currently have.
 	nops.push(agent.opportunities[agent.company_id]);
 	agent.opportunities.splice(agent.company_id , 1);
 	agent.company_id = 0;
+
         // Find the best other opportunities.
 	agent.opportunities.push(nop);
+	// console.log("new opportunity : " + nop.jobs + " , " + nop.output);
+	var notTheSame = [];
 	for(var i = 0 ; i < agent.nl - 1; i++){
-	    var id = agent_find_best_opportunity(agent, []);
+	    var id = agent_find_best_opportunity(agent, notTheSame);
 	    nops.push(agent.opportunities[id]);
-	    agent.opportunities.splice(id , 1);
+	    notTheSame.push(id);
 	}
 	agent.opportunities = nops;
     }
 }
 
+
 function agent_learn_workplaces(agent , agents , par) {
+    var wage = 0;
+    var times = 0;
     agent.known_workplaces = [];
     for(var j = 0; j < agent.nl; j++) {
 	var nw = -1;
@@ -232,9 +274,12 @@ function agent_learn_workplaces(agent , agents , par) {
 	    nag = agents[nw];
 	} while (nag.company_funded == 0 || !different_from_all(nw , agent.known_workplaces))
 	if(nw != -1) {
+	    wage += agents[nw].provided_wage;
+	    times++;
 	    agent.known_workplaces.push(nw);
 	}
     }
+    agent.average_wage = wage / times;
 }
 
 
@@ -255,12 +300,12 @@ function agent_learn_products(agent , agents , par) {
 	    nagp = agents[np];
 	} while (!agent_has_produced(nagp) || !different_from_all(np , agent.known_products))
 	if(np != -1) {
-	    times++;
 	    price += agents[np].product_price;
+	    times++;
 	    agent.known_products.push(np);
 	}
     }
-    agent.average_consumer_price = price / times;
+    agent.average_product_price = price / times;
 }
 
 
@@ -279,7 +324,7 @@ function agent_learn_loan_rates(agent , agents , par) {
 	    nr = rand_except(par.na , agent.id);
 	    nagr = agents[nr];
 	    var nop = nagr.opportunities[nagr.company_id]
-	    nmin_money = par.min_money_multi * (nop.jobs * nagr.provided_wage);
+	    nmin_money = nop.jobs * nagr.provided_wage;
 	} while (nagr.money >  nmin_money || !different_from_all(nr , agent.known_loan_rates))
 	if(nr != -1) {
 	    agent.known_loan_rates.push(nr);
@@ -290,21 +335,28 @@ function agent_learn_loan_rates(agent , agents , par) {
 
 
 function agent_find_cheapest (agent , agents) {
-    var id = agent.known_products[0];
-    var price = agents[id].product_price;
-    var available = agents[id].production - agents[id].units_sold;
-
+    var list_with_available_products = [];
     for (var i = 1; i < agent.known_products.length ; i++) {
 	var nid = agent.known_products[i];
-	var nprice = agents[nid].product_price;
 	var navailable = agents[nid].production - agents[nid].units_sold;
-	if ((nprice <= price && navailable > 0) || available <= 0) {
-	    id = nid;
-	    price = nprice;
-            available = navailable;
+	if (navailable > 0) {
+	    list_with_available_products.push(nid);
 	}
     }
-    if(available > 0) {
+
+
+    if(list_with_available_products.length > 0) {
+	var id = list_with_available_products[0];
+	var price = agents[id].product_price;
+	
+	for (var i = 1; i < list_with_available_products.length ; i++) {
+	    var nid = list_with_available_products[i];
+	    var nprice = agents[nid].product_price;
+	    if (nprice <= price) {
+		id = nid;
+		price = nprice;
+	    }
+	}
 	return id;
     } else {
 	return -1;
@@ -324,7 +376,7 @@ function agent_consume(agent , agents , par) {
 		return;
 	    } else {
 		agent.money = agent.money - seller.product_price;
-		assert(agent.money >= 0 , "Consumer money should ne non negative.");
+		assert(agent.money >= 0 , "Consumer money should be non negative.");
 		seller.money = seller.money + seller.product_price;
 		seller.units_sold++;
 		assert(seller.production - seller.units_sold >= 0 , "Units sold should fewer than production.");
@@ -339,12 +391,12 @@ function agent_find_best_opportunity(agent , rejected) {
     var price = agent.product_price;
     var wage = agent.provided_wage;
     var op =  agent.opportunities[agent.company_id];
-    var id = 0;
+    var id = agent.company_id;
     var the_profit = op.output * price - op.jobs * wage;
     for (var i = 0; i < agent.opportunities.length; i++) {
 	var nop = agent.opportunities[i];
 	var nprofit = nop.output * price - nop.jobs * wage;
-	if ((nprofit > the_profit) && (undefined === rejected.find(function(el) {el == i}))) {
+	if ((nprofit >= the_profit) && (-1 == rejected.indexOf(i))) {
 	    op = nop;
 	    the_profit = nprofit;
 	    id = i;
@@ -356,22 +408,29 @@ function agent_find_best_opportunity(agent , rejected) {
 
 // The multiplier is used so as to avoid halting the operation of the company by lending money to others.
 // Of course , the op might change for the lender, but at least, he can fund the current one.
-function agent_find_lower_rate (agent , money_needed , agents , min_money_multi) {
-    var id = agent.known_loan_rates[0];
-    var rate = agents[id].loan_rate;
+function agent_find_lower_rate (agent , money_needed , agents) {
+    var list_who_has_money = [];
+
     for (var i = 1; i < agent.known_loan_rates.length ; i++) {
 	var nid = agent.known_loan_rates[i];
-	var nrate = agents[nid].loan_rate;
 	var nop = agents[nid].opportunities[agents[nid].company_id]
-	var min_money = min_money_multi * (nop.jobs * agents[nid].provided_wage);
-	if ((nrate < rate) && (agents[nid].money - min_money - money_needed > 0)) {
-	    id = nid;
-	    rate = nrate;
+	var min_money = nop.jobs * agents[nid].provided_wage;
+	if (agents[nid].money - min_money - money_needed > 0) {
+	    list_who_has_money.push(nid);
 	}
     }
-    var op = agents[id].opportunities[agents[id].company_id]
-    var min_money = min_money_multi * (op.jobs * agents[id].provided_wage);
-    if(agents[id].money - min_money - money_needed > 0) {
+
+    if(list_who_has_money.length > 0) {
+	var id = list_who_has_money[0];
+	var rate = agents[id].loan_rate;
+	for (var i = 1; i < list_who_has_money.length ; i++) {
+	    var nid = list_who_has_money[i];
+	    var nrate = agents[nid].loan_rate;
+	    if (nrate < rate) {
+		id = nid;
+		rate = nrate;
+	    }
+	}
 	return id;
     } else {
 	return -1;
@@ -379,12 +438,11 @@ function agent_find_lower_rate (agent , money_needed , agents , min_money_multi)
 }
 
 
+
 // Here I assume that the lenders give money to everyone that is asking,
 // and that the borrower will pay eveentually all his debt, no defaults are possible.
 // This is to simplify the model.
-function agent_fund_company(agent , agents , par) {
-    agent.company_funded = 0;
-    agent.changed_op = 0;
+function agent_fund_company(agent , agents) {
     if(agent.debts.length > 0) {
 	return;
     }
@@ -401,26 +459,41 @@ function agent_fund_company(agent , agents , par) {
 	    if(op_id != company_id){
 		agent.changed_op = 1;
 	    }
-	} else {
-	    var rem = req - agent.money;
-	    var lid = agent_find_lower_rate (agent , rem , agents , par.min_money_multi);
-	    if(lid != -1) {
-		var lender = agents[lid];
-		var loan = Math.floor((lender.loan_rate + 100) * rem / 100);
-		if(agent_the_profit(agent) - loan > 0) {
-		    agent.company_id = op_id;
-		    agent.company_funded = 1;
-		    agent.money = agent.money + rem;
-		    agent.debts.push(new Dept(lid , rem , lender.loan_rate));
-		    lender.money = lender.money - rem;
-		    assert(lender.money >= 0 , "Lender money non negative");
-		    lender.lent_money = lender.lent_money + rem;
-		    if(lender.company_funded == 1) {
-			assert(lender.money > lender.opportunities[lender.company_id].jobs * lender.provided_wage , "Lender gave more money that he could.")
+	}
+	rejected.push(op_id);
+    } while ((agent.company_funded == 0) && (rejected.length < agent.opportunities.length)) ;
+}
+
+function agent_fund_company_with_loan(agent , agents) {
+    if(agent.company_funded == 1 || agent.debts.length > 0) {
+	return;
+    }
+
+    var company_id = agent.company_id;
+    var rejected = [];
+    do {
+	var op_id = agent_find_best_opportunity(agent , rejected);
+	var op = agent.opportunities[op_id];
+	var req = op.jobs * agent.provided_wage;
+	assert(agent.money < req , "The agent should not have any money at this point.");
+	var rem = req - agent.money;
+	var lid = agent_find_lower_rate (agent , rem , agents);
+	if(lid != -1) {
+	    var lender = agents[lid];
+	    var loan = Math.floor((lender.loan_rate + 100) * rem / 100);
+	    if(agent_the_profit(agent) - loan > 0) {
+		agent.company_id = op_id;
+		agent.company_funded = 1;
+		agent.money = agent.money + rem;
+		agent.debts.push(new Dept(lid , rem , lender.loan_rate));
+		lender.money = lender.money - rem;
+		assert(lender.money >= 0 , "Lender money non negative");
+		lender.lent_money = lender.lent_money + rem;
+		if(lender.company_funded == 1) {
+		    assert(lender.money > lender.opportunities[lender.company_id].jobs * lender.provided_wage , "Lender gave more money that he could.")
 		    }
-		    if(op_id != company_id){
-			agent.changed_op = 1;
-		    }
+		if(op_id != company_id){
+		    agent.changed_op = 1;
 		}
 	    }
 	}
@@ -451,24 +524,37 @@ function agent_pay_debt(agent, agents) {
 
 function agent_pick_workplace(agent , agents , par) {
     assert(agent.jobs_filled == agent.workers.length , "The workers must equal the jobs filled." + agent.jobs_filled + " " + agent.workers.length);
-    var id = agent.known_workplaces[0];
-    var wage = agents[id].provided_wage;
+
+    var list_with_available_jobs = [];
     for (var i = 1; i < agent.known_workplaces.length ; i++) {
 	var nid = agent.known_workplaces[i];
 	var employer = agents[nid];
-	var nwage = employer.provided_wage;
 	var available_jobs = employer.opportunities[employer.company_id].jobs - employer.jobs_filled;
-	if ((nwage < wage) && (employer.company_funded == 1) && (available_jobs > 0)) {
-	    id = nid;
-	    wage = nwage;
+	if ((employer.company_funded == 1) && (available_jobs > 0)) {
+	    list_with_available_jobs.push(nid);
 	}
     }
-    var employer = agents[id];
-    var available_jobs = employer.opportunities[employer.company_id].jobs - employer.jobs_filled;
-    var min_wage = par.min_consumption * agent.average_consumer_price;
-    if((employer.company_funded == 1) && (available_jobs > 0) && (employer.provided_wage > min_wage)) {
-	employer.jobs_filled++;
-	employer.workers.push(agent.id);
+
+    if(list_with_available_jobs.length > 0) {
+	var id = list_with_available_jobs[0];
+	var wage = agents[id].provided_wage;
+	for (var i = 1; i < list_with_available_jobs.length ; i++) {
+	    var nid = list_with_available_jobs[i];
+	    var employer = agents[nid];
+	    var nwage = employer.provided_wage;
+	    if (nwage > wage) {
+		id = nid;
+		wage = nwage;
+	    }
+	}
+	
+	var employer = agents[id];
+	var min_wage = par.min_consumption * agent.average_product_price;
+
+	if(employer.provided_wage > min_wage){
+	    employer.jobs_filled++;
+	    employer.workers.push(agent.id);
+	}
     }
 }
 
@@ -492,6 +578,24 @@ function agent_produce(agent , agents) {
 
 // This needs to be done after adaptation and after production, cosmuption.
 function agent_after_adapt(agent , agents) {
+    // Accurate information of prices and wages is important for many operations.
+    // If the agent cannot have direct contact with the market, it checks the average price.
+    if(agent.company_funded == 0) {
+	agent.provided_wage = Math.floor (agent.average_wage);
+	agent.product_price = Math.floor (agent.average_product_price + 1);
+	var th_profit = agent_the_profit(agent);
+	// TODO Is this the correct way to do it?
+	if(th_profit <= 0) {
+	    agent.provided_wage += th_profit - 1;
+	    if(agent.provided_wage <= 0) {
+		agent.product_price -= (agent.provided_wage - 1);
+		agent.provided_wage = 1;
+	    }
+	}
+	assert(agent_the_profit(agent) > 0 , "GGG");
+    }
+    agent.company_funded = 0;
+    agent.changed_op = 0;
     agent.units_sold = 0;
     agent.lent_money = 0;
     agent.production = 0;
@@ -531,14 +635,13 @@ function Par(){
     this.na = 1000;
     this.money = 10000;
     this.op_chance = 1000;
-    this.jobs_width = 10;
-    this.output_width = 20;
+    this.jobs_width = 100;
+    this.output_width = 100;
     this.cwidth = 1000;
     //required to replenish labor power.
     //It is used when looking for work.
-    this.min_consumption = 2;
-    this.min_money_multi = 5;
-    this.taxation_rate = 50;
+    this.min_consumption = 1;
+    this.taxation_rate = 10;
     
 }
 
@@ -715,6 +818,7 @@ function equation(t, env) {
     perform_action(env.agents , agent_learn_opportunity , env.par);
     perform_action(env.agents , agent_learn_loan_rates , env.par);
     perform_action(env.agents , agent_fund_company , env.par);
+    perform_action(env.agents , agent_fund_company_with_loan);
     perform_action(env.agents , agent_learn_workplaces , env.par);
     perform_action(env.agents , agent_pick_workplace , env.par);
     perform_action(env.agents , agent_produce , env.par);
@@ -736,13 +840,14 @@ function equation(t, env) {
     redistribution(env.agents , taxes);
     
     perform_action(env.agents , agent_pay_debt , env.par);
-    perform_action(env.agents , agent_adapt , env.par);
+    perform_action(env.agents , agent_adapt_prices , env.par);
+    perform_action(env.agents , agent_adapt_loan_rate , env.par);
     perform_action(env.agents , agent_after_adapt , env.par);
 
 
     assert(env.total_sales <= env.total_production , "The total sales should be smaller that total production.");
-    var b = compute_total_money(env.agents);
-    assert(compute_total_money(env.agents) == env.total_money , "The total amount of money has changed.");
+    var total_money = compute_total_money(env.agents);
+    assert(total_money == env.total_money , "The total amount of money has changed.");
   //  env.total_money = compute_total_money(env.agents);
 }
 
