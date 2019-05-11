@@ -1,6 +1,7 @@
-function Simulation(charts_info_, sample_rate_ , update_rate_) {
+function Simulation(charts_info_, distr_info_ , sample_rate_ , update_rate_) {
    
     this.charts_info = charts_info_;
+    this.distr_info = distr_info_;
 
 
     this.hasStarted = false;
@@ -9,6 +10,8 @@ function Simulation(charts_info_, sample_rate_ , update_rate_) {
     this.xcharts = {};
     this.xpoints = {};
 
+    this.xdcharts = {};
+    
     this.update_rate = update_rate_;
     this.sample_rate = sample_rate_;
     this.time = 0;
@@ -25,6 +28,13 @@ function Simulation(charts_info_, sample_rate_ , update_rate_) {
             var y_name = self.xcharts[key].y_name;
             self.xpoints[key].push(new Point(x_name == 'time' ? (self.time * self.sample_rate) : e.data[x_name], e.data[y_name]));
         });
+
+	// dcharts are updated at the sample rate since at each sample we have a different chart.
+        Object.keys(self.xdcharts).forEach(function(key) {
+            self.xdcharts[key].clear();
+            self.xdcharts[key].add(e.data.dcharts[key]);
+        });
+
 	
 // Update the charts
 	if(self.time == self.update_rate + self.prev_time){
@@ -41,7 +51,6 @@ function Simulation(charts_info_, sample_rate_ , update_rate_) {
 	    self.worker.postMessage({option : "more"});
 	}
     };
-    
 }
 
 
@@ -52,6 +61,9 @@ Simulation.prototype.start = function() {
         self.charts_info.forEach(function(each) {
             self.xcharts[each[2]] = new Chart(each[2],each[0], each[1], each[3], each[4]);
             self.xpoints[each[2]] = [];
+        });
+        self.distr_info.forEach(function(each) {
+            self.xdcharts[each[2]] = new Chart(each[2],each[0], each[1], each[3], each[4]);
         });
 
         self.worker.postMessage({option : "start" , sample_rate : this.sample_rate});
@@ -81,9 +93,13 @@ Simulation.prototype.reset = function() {
     self.charts_info.forEach(function(each) {
         $("#" + each[2]).empty();
     });
+    self.distr_info.forEach(function(each) {
+        $("#" + each[2]).empty();
+    });
     
     self.xcharts = {};
     self.xpoints = {};
+    self.xdcharts = {};
     self.hasStarted = false;
     self.time = 0;
     self.prev_time = 0;

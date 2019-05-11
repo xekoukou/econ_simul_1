@@ -1,3 +1,8 @@
+function Point(x , y){
+    this.x = x;
+    this.y = y;
+}
+
 function assert(b , msg) {
     if(!b) {
 	throw msg || "Assertion Failed"
@@ -82,6 +87,7 @@ function Agent(id , money , nl , na) {
 	this.opportunities.push(fixed_op(2 , 10));
     }
     this.company_id = 0;
+    this.replication = 1;
     this.changed_op = 0;
     this.provided_wage = 8;
     this.product_price = 2;
@@ -641,7 +647,7 @@ function Par(){
     //required to replenish labor power.
     //It is used when looking for work.
     this.min_consumption = 1;
-    this.taxation_rate = 10;
+    this.taxation_rate = 50;
     
 }
 
@@ -661,6 +667,8 @@ function Environment(){
     this.companies = 0;
     this.average_profit = 0;
     this.total_money = this.par.na * this.par.money;
+    this.profit_distr = compute_profit_distr(this.agents , this.total_money);
+    this.money_distr = compute_money_distr(this.agents , this.par.money);
 }
 
 function taxation(agents , taxation_rate) {
@@ -747,13 +755,14 @@ function compute_employment(agents) {
     return n;
 }
 
-function compute_average_profit(agents) {
+function compute_total_profit(agents) {
     var profit = 0;
     agents.forEach(function(agent){
 	if(agent_has_produced(agent)) {
 	    profit = profit + agent_profit(agent)
 	}
     });
+    return profit;
 }
 function compute_average_wage(agents , employment , prev_wage) {
     if(employment == 0){
@@ -804,15 +813,53 @@ function compute_average_profit(agents , companies) {
     if(companies == 0){
 	return 0;
     }
+    return compute_total_profit(agents) / companies;
+}
 
-    var profit = 0;
+function compute_profit_distr(agents , average_profit){
+    var distr = {};
+    var unit = average_profit / 100;
     agents.forEach(function(agent){
-	if(agent_has_produced(agent)){
-	    profit = profit + agent_profit(agent);
+	if(agent_has_produced(agent)) {
+	    var position = Math.floor (agent_profit(agent) / unit);
+	    if(distr[position] === undefined){
+		distr[position] = 0;
+	    }
+	    distr[position]++;
 	}
     });
-    return profit / companies;
+    var pdistr = [];
+    Object.keys(distr).forEach(function(index){
+	var each = distr[index];
+	if(each != 0) {
+	    pdistr.push(new Point(Math.log((index * unit) + 1) , Math.log(each)));
+	}
+    });
+    return pdistr;
 }
+
+function compute_money_distr(agents , initial_money){
+    var distr = {};
+    var unit = initial_money / 100;
+    agents.forEach(function(agent){
+	var position = Math.floor (agent.money / unit);
+	if(distr[position] === undefined){
+	    distr[position] = 0;
+	}
+	distr[position]++;
+    });
+    var pdistr = [];
+    Object.keys(distr).forEach(function(index){
+	var each = distr[index];
+	if(each != 0) {
+	    // We insert 1 so that the log has non zero input.
+	    pdistr.push(new Point(Math.log((index * unit) + 1) , Math.log(each)));
+	}
+    });
+    return pdistr;
+}
+
+
 
 function equation(t, env) {
     perform_action(env.agents , agent_learn_opportunity , env.par);
@@ -825,16 +872,19 @@ function equation(t, env) {
     perform_action(env.agents , agent_learn_products , env.par);
     perform_action(env.agents , agent_consume , env.par);
 
-    env.total_production = compute_total_production(env.agents);
-    env.total_sales = compute_total_sales(env.agents);
-    env.employment = compute_employment(env.agents);
-    env.companies = compute_number_of_companies(env.agents);
-    env.average_profit = compute_average_profit(env.agents, env.companies);
-    env.total_lent_money = compute_total_lent_money(env.agents);
-    env.average_price = compute_average_price(env.agents , env.total_sales , env.average_price);
-    env.average_wage = compute_average_wage(env.agents , env.employment , env.average_wage);
-    env.average_loan_rate = compute_average_loan_rate(env.agents , env.total_lent_money , env.average_loan_rate);
-
+    if(time + 1 >=  sample_rate + prev_time) {
+	env.total_production = compute_total_production(env.agents);
+	env.total_sales = compute_total_sales(env.agents);
+	env.employment = compute_employment(env.agents);
+	env.companies = compute_number_of_companies(env.agents);
+	env.average_profit = compute_average_profit(env.agents, env.companies);
+	env.profit_distr = compute_profit_distr(env.agents , env.average_profit);
+	env.money_distr = compute_money_distr(env.agents , env.par.money);
+	env.total_lent_money = compute_total_lent_money(env.agents);
+	env.average_price = compute_average_price(env.agents , env.total_sales , env.average_price);
+	env.average_wage = compute_average_wage(env.agents , env.employment , env.average_wage);
+	env.average_loan_rate = compute_average_loan_rate(env.agents , env.total_lent_money , env.average_loan_rate);
+    }
 
     var taxes = taxation(env.agents ,env.par.taxation_rate);
     redistribution(env.agents , taxes);
@@ -851,6 +901,11 @@ function equation(t, env) {
   //  env.total_money = compute_total_money(env.agents);
 }
 
+function Dchart(env) {
+    this.profit_distr = env.profit_distr;
+    this.money_distr = env.money_distr;
+}
+
 function Result(env) {
     this.total_production = env.total_production;
     this.total_sales = env.total_sales;
@@ -861,6 +916,7 @@ function Result(env) {
     this.average_loan_rate = env.average_loan_rate;
     this.companies = env.companies;
     this.average_profit = env.average_profit;
+    this.dcharts = new Dchart(env);
    // this.total_money = total_money_;
 }
 
