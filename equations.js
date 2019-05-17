@@ -582,7 +582,7 @@ function agent_fund_companies(agent , agents) {
 // This is to simplify the model.
 // TODO Should we reduce the frequency with which companies change production processes ?
 function agent_fund_company(agent , company , agents) {
-    if(agent.debts.length > 0) {
+    if(agent.debts.length > 0 || company.prev_prod_profit < 0) {
 	return;
     }
     var company_op_id = company.op_id;
@@ -617,7 +617,7 @@ function agent_fund_companies_with_loan(agent , agents) {
 }
 
 function agent_fund_company_with_loan(agent , company , agents) {
-    if(company.funded == 1 || agent.debts.length > 0) {
+    if(company.funded == 1 || agent.debts.length > 0 || company.prev_prod_profit < 0) {
 	return;
     }
 
@@ -984,11 +984,11 @@ function perform_action(agents , action , par){
 function Par(){
     this.nl = 10;
     this.na = 1000;
-    this.money = 100000;
-    this.op_chance = 10000;
+    this.money = 1000;
+    this.op_chance = 100000;
     this.jobs_width = 100;
     this.output_width = 100;
-    this.cwidth = 4;
+    this.cwidth = 5;
     //required to replenish labor power.
     //It is used when looking for work.
     //This option is very unstable for some reason.
