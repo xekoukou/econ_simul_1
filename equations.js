@@ -17,6 +17,13 @@ function rand(width) {
     return Math.floor(Math.random() * width);
 }
 
+
+function rand_exp(unit) {
+    var i = Math.random();
+    return Math.floor((0 - Math.log(1 - i)) * unit);
+}
+
+
 function rand_except(width , id) {
     var nid;
     do {
@@ -201,6 +208,15 @@ function company_adapt_prices(agent , company) {
 	company.prev_price_higher = -1;
 	if(company.provided_wage > 1 && rand(10) == 0) {
 	    company.provided_wage--;
+	    //Since unfunded, you have no personal knowledge about the product price,
+	    //thus update it by external information till you are producing again.
+	    while(company.product_price > agent.average_product_price){
+		company.product_price--;
+		if(company_the_profit(agent , company) <=0) {
+		    company.product_price++;
+		    break;
+		}
+	    }
 	}
     }
 
@@ -225,7 +241,11 @@ function company_adapt_prices(agent , company) {
 	    var	re_profit = company_profit(agent , company);
 
 	    // profit cannot be used to determine the price changes , thus we pick randomly.
-	    if(company.prev_price_higher == -1 || company.changed_op == 1){
+	    // The randomization here is necessary so that the agent manages to perceive that
+	    // it is not his action that changed production, but the macroscopic conditions.
+	    // Consider the case where the agent reduces the price and the overall sales
+	    // of the economy increase. If the agent sees increased profits, what would be the reason?
+	    if(company.prev_price_higher == -1 || company.changed_op == 1 || rand(100) == 0){
 		company.prev_prod_profit = 0;
 		company.step = 0;
 		if(rand(2) == 0 && company.product_price > 1 && th_profit - op.output > 0){
@@ -300,7 +320,8 @@ function agent_adapt_loan_rate(agent) {
     // Interest rate policy
     var loan_profit = agent.lent_money * agent.loan_rate / 100;
 
-    if(agent.prev_loan_rate_higher == -1){
+    // For the rand see, adapt_prices.
+    if(agent.prev_loan_rate_higher == -1 || rand(100) == 0){
 	agent.lstep = 0;
 	agent.prev_loan_profit = 0;
 	if(rand(2) == 0 && agent.loan_rate > 1){
@@ -498,19 +519,20 @@ function agent_consume(agent , agents , par) {
 	debt += debt.amount;
     });
 
-    var con = rand(par.cwidth);
-    while((agent.money - debt > 0) && (con > 0)) {
-	con--;
+    var money = Math.min(agent.money - debt , rand_exp((agent.money - debt) * par.cons_exp));
+
+    while(money > 0) {
 	var cmp_info = agent_find_cheapest(agent , agents);
 	if (cmp_info == -1) {
 	    return;
 	} else {
 	    var seller = agents[cmp_info.agent_id];
 	    var seller_cmp = seller.companies[cmp_info.company_id];
-	    if(agent.money - debt < seller_cmp.product_price) {
+	    if(money < seller_cmp.product_price) {
 		return;
 	    } else {
 		agent.money = agent.money - seller_cmp.product_price;
+		money = money - seller_cmp.product_price;
 		assert(agent.money >= 0 , "Consumer money should be non negative.");
 		seller.money = seller.money + seller_cmp.product_price;
 		seller_cmp.units_sold++;
@@ -985,13 +1007,12 @@ function Par(){
     this.nl = 10;
     this.na = 1000;
     this.money = 1000;
-    this.op_chance = 100000;
+    this.op_chance = 10000;
     this.jobs_width = 100;
     this.output_width = 100;
-    this.cwidth = 5;
-    //required to replenish labor power.
-    //It is used when looking for work.
-    //This option is very unstable for some reason.
+    // Used in an exp. function to determine consumption.
+    this.cons_exp = 1/3;
+    //Unstable
     this.min_consumption = 0;
     this.taxation_rate = 0;
     
@@ -1013,9 +1034,11 @@ function Environment(){
     this.companies = 0;
     this.average_profit = 0;
     this.total_money = this.par.na * this.par.money;
-    this.profit_distr = compute_profit_distr(this.agents , this.total_money);
-    this.money_distr = compute_money_distr(this.agents , this.par.money);
+    this.profit_distr = compute_profit_distr(this.agents);
+    this.money_distr = compute_money_distr(this.agents);
+    this.company_productivity_distr = compute_company_productivity_distr(this.agents);
     this.company_size_distr = compute_company_size_distr(this.agents);
+    this.company_worker_size_distr = compute_company_worker_size_distr(this.agents);
 }
 
 function taxation(agents , taxation_rate) {
@@ -1150,6 +1173,37 @@ function compute_number_of_companies(agents) {
     return companies;
 }
 
+// f must preserve order.
+function generate_distr(distr , f , g) {
+    var keys = Object.keys(distr).map(each => parseInt(each));
+    keys.sort(function(a , b) {
+	if(b > a) {
+	    return -1;}
+	if(b < a) {
+	    return 1;}
+	return 0;
+    });
+    
+    var points = [];
+    for(var i = 0 ; i < keys.length;  i++){
+	var key = keys[i];
+	points.push(new Point(f(key) , g (distr[key])));
+	if(i + 1 < keys.length) {
+	    var nkey = keys[i + 1];
+	    var j = 1;
+	    while(nkey > key + j) {
+		points.push(new Point(f(key + j) , g(0))) ;
+		j++;
+	    }
+	}
+    }
+    return points;
+}
+
+function identity(x){
+    return x;
+}
+
 function compute_company_size_distr(agents) {
     var distr = {};
     agents.forEach(function(agent){
@@ -1165,15 +1219,8 @@ function compute_company_size_distr(agents) {
 	}
 	distr[size]++;
     });
-
-    var pdistr = [];
-    Object.keys(distr).forEach(function(index){
-	var each = distr[index];
-	if(each != 0) {
-	    pdistr.push(new Point(index , each));
-	}
-    });
-    return pdistr;
+    delete distr[0];
+    return generate_distr(distr , identity , identity);
 }
 
 
@@ -1192,16 +1239,29 @@ function compute_company_worker_size_distr(agents) {
 	}
 	distr[size]++;
     });
-
-    var pdistr = [];
-    Object.keys(distr).forEach(function(index){
-	var each = distr[index];
-	if(each != 0) {
-	    pdistr.push(new Point(index , each));
-	}
-    });
-    return pdistr;
+    delete distr[0];
+    return generate_distr(distr , identity , identity);
 }
+
+function compute_company_productivity_distr(agents) {
+    var distr = {};
+    agents.forEach(function(agent){
+        Object.keys(agent.companies).forEach(function(key) {
+	    var company = agent.companies[key];
+	    if(company_has_filled_job_positions(agent, company)){
+		var op = agent.opportunities[company.op_id];
+		var prod = Math.floor(op.output / op.jobs);
+		if(distr[prod] === undefined){
+		    distr[prod] = 0;
+		}
+		distr[prod]++;
+	    }
+	});
+    });
+
+    return generate_distr(distr , identity , identity);
+}
+
 
 
 
@@ -1212,12 +1272,17 @@ function compute_average_profit(agents , companies , average_price) {
     return compute_total_profit(agents) / (companies * average_price);
 }
 
-function compute_profit_distr(agents , average_profit){
+function compute_profit_distr(agents){
     var distr = {};
-    var unit = average_profit / 50;
     agents.forEach(function(agent){
 	if(agent_has_filled_job_positions(agent)) {
-	    var position = Math.floor (agent_total_profit(agent) / unit);
+	    var position;
+	    var profit = agent_total_profit(agent);
+	    if(profit > 0){
+		position = Math.floor (Math.log(profit));
+	    } else {
+		position = - Math.floor (Math.log(- profit + 1));
+	    }
 	    //console.log(position);
 	    //console.log(agent);
 	    if(distr[position] === undefined){
@@ -1226,37 +1291,22 @@ function compute_profit_distr(agents , average_profit){
 	    distr[position]++;
 	}
     });
-    var pdistr = [];
-    Object.keys(distr).forEach(function(index){
-	var each = distr[index];
-	if(each != 0) {
-	    pdistr.push(new Point(Math.log((parseInt(index) * unit) + 1) , Math.log(each)));
-	}
-    });
-    //console.log(pdistr);
-    return pdistr;
+
+    return generate_distr(distr , identity , function(x) {return Math.log(x + 1)});
 }
 
 
-function compute_money_distr(agents , initial_money){
+function compute_money_distr(agents){
     var distr = {};
-    var unit = initial_money / 50;
     agents.forEach(function(agent){
-	var position = Math.floor (agent.money / unit);
+	var position = Math.floor (Math.log(agent.money + 1));
 	if(distr[position] === undefined){
 	    distr[position] = 0;
 	}
 	distr[position]++;
     });
-    var pdistr = [];
-    Object.keys(distr).forEach(function(index){
-	var each = distr[index];
-	if(each != 0) {
-	    // We insert 1 so that the log has non zero input.
-	    pdistr.push(new Point(Math.log((parseInt(index) * unit) + 1) , Math.log(each)));
-	}
-    });
-    return pdistr;
+
+    return generate_distr(distr , identity , function(x) {return Math.log(x + 1)});
 }
 
 
@@ -1278,9 +1328,11 @@ function equation(t, env) {
 	env.total_sales = compute_total_sales(env.agents);
 	env.employment = compute_employment(env.agents);
 	env.companies = compute_number_of_companies(env.agents);
-	env.profit_distr = compute_profit_distr(env.agents , env.average_profit);
-	env.money_distr = compute_money_distr(env.agents , env.par.money);
+	env.profit_distr = compute_profit_distr(env.agents);
+	env.money_distr = compute_money_distr(env.agents);
+	env.company_productivity_distr = compute_company_productivity_distr(env.agents);
 	env.company_size_distr = compute_company_size_distr(env.agents);
+	env.company_worker_size_distr = compute_company_worker_size_distr(env.agents);
 	env.total_lent_money = compute_total_lent_money(env.agents);
 	env.average_price = compute_average_price(env.agents , env.total_sales , env.average_price);
 	env.average_profit = compute_average_profit(env.agents, env.companies , env.average_price);
@@ -1307,7 +1359,9 @@ function equation(t, env) {
 function Dchart(env) {
     this.profit_distr = env.profit_distr;
     this.money_distr = env.money_distr;
+    this.company_productivity_distr = env.company_productivity_distr;
     this.company_size_distr = env.company_size_distr;
+    this.company_worker_size_distr = env.company_worker_size_distr;
 }
 
 function Result(env) {

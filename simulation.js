@@ -14,5 +14,7 @@ var simulation = new Simulation(
     ], [
         ["profit" , "companies" , "profit_distr", 1800, 800],
         ["money" , "agents" , "money_distr", 1800, 800],
-        ["company_size" , "number" , "company_size_distr", 1800, 800]
+        ["company_size" , "number" , "company_size_distr", 1800, 800],
+        ["company_worker_size" , "number" , "company_worker_size_distr", 1800, 800],
+        ["company_productivity" , "number" , "company_productivity_distr", 1800, 800]
     ] , 10 , 1);
