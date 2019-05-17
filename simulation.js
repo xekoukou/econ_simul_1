@@ -13,5 +13,6 @@ var simulation = new Simulation(
 //        ["time" , "total_money" , "test_id3", 900, 400]
     ], [
         ["profit" , "companies" , "profit_distr", 1800, 800],
-        ["money" , "agents" , "money_distr", 1800, 800]
+        ["money" , "agents" , "money_distr", 1800, 800],
+        ["company_size" , "number" , "company_size_distr", 1800, 800]
     ] , 10 , 1);

@@ -134,7 +134,7 @@ function Agent(id , money , nl , na) {
     this.loan_rate = 1;
 }
 
-function company_has_produced(agent , company) {
+function company_has_filled_job_positions(agent , company) {
     var op = agent.opportunities[company.op_id];
     if(company.funded == 1 && company.jobs_filled == op.jobs){
 	return true;
@@ -142,12 +142,12 @@ function company_has_produced(agent , company) {
     return false;
 }
 
-function agent_has_produced(agent) {
+function agent_has_filled_job_positions(agent) {
     var keys = Object.keys(agent.companies);
     while(keys.length > 0){
 	id = keys.pop();
 	var company = agent.companies[id];
-	if(company_has_produced(agent, company)){
+	if(company_has_filled_job_positions(agent, company)){
 	    return true;
 	}
     }
@@ -174,7 +174,7 @@ function company_the_profit(agent , company) {
 }
 
 function company_profit(agent , company) {
-    if(company_has_produced(agent, company)) {
+    if(company_has_filled_job_positions(agent, company)) {
 	return company.units_sold * company.product_price - company.jobs_filled * company.provided_wage;
     } else {
 	return 0;
@@ -268,7 +268,7 @@ function company_adapt_prices(agent , company) {
 		}
 		// We randomly try to change wages. That should not result
 		// in the company being closed all the time due to lack of workers.
-		if(rand(10000) == 0) {
+		if(rand(100) == 0) {
 		    // Reduce the wage
 		    if(company.provided_wage > 1) {
 			company.provided_wage--;
@@ -414,8 +414,8 @@ function agent_learn_products(agent , agents , par) {
 	    nagp = agents[nid];
 	    cid = rand_key(nagp.companies);
 	    cmp_info = new Company_info(nid , cid);
-	} while (!company_has_produced(nagp , nagp.companies[cid]) || !different_from_all_cmp(cmp_info , agent.known_products))
-	if(nid != -1 && company_has_produced(nagp , nagp.companies[cid]) && different_from_all_cmp(cmp_info , agent.known_products)) {
+	} while (!company_has_filled_job_positions(nagp , nagp.companies[cid]) || !different_from_all_cmp(cmp_info , agent.known_products))
+	if(nid != -1 && company_has_filled_job_positions(nagp , nagp.companies[cid]) && different_from_all_cmp(cmp_info , agent.known_products)) {
 	    price += nagp.companies[cid].product_price;
 	    times++;
 	    agent.known_products.push(cmp_info);
@@ -478,8 +478,8 @@ function agent_find_cheapest (agent , agents) {
 	for (var i = 0; i < list_with_available_products.length ; i++) {
 	    var ncmp_info = list_with_available_products[i];
             var nseller = agents[ncmp_info.agent_id];
-	    var nseller_cmp = seller[ncmp_info.company_id];
-	    var nprice = seller_cmp.product_price;
+	    var nseller_cmp = nseller.companies[ncmp_info.company_id];
+	    var nprice = nseller_cmp.product_price;
 	    if (nprice <= price) {
 		cmp_info = ncmp_info;
 		price = nprice;
@@ -683,14 +683,52 @@ function agent_pay_debt(agent, agents) {
     }
 }
 
+function find_remaining_workers(agents) {
+    var ids = fill_with_ids(agents.length);
+    while(ids.length > 0) {
+	var id = pick_rand_id(ids);
+	var agent = agents[id];
+	var keys = Object.keys(agent.companies);
+	for(var j = 0 ; j < keys.length; j++) {
+	    var company = agent.companies[keys[j]];
+	    if(company.funded == 1 && !company_has_filled_job_positions(agent , company) && company.jobs_filled != 0){
+		company.jobs_filled = 0;
+		var workers = company.workers;
+		company.workers = [];
+		return { "cmp_info" : new Company_info(agent.id , company.id) ,
+		         "workers"  : workers
+		       }
+	    }
+	}
+    }
+    return -1;
+}
+
+function relocate_workers(agents , par) {
+    var rejected = [];
+    var result = find_remaining_workers(agents);
+    while(result != -1){
+	rejected.push(result.cmp_info);
+	result.workers.forEach(function(id){
+	    var agent = agents[id];
+	    agent_pick_workplace_(agent, agents, par , rejected);
+	});
+	result = find_remaining_workers(agents);
+    }
+}
+
 function agent_pick_workplace(agent , agents , par) {
+    agent_pick_workplace_(agent , agents , par , []);
+}
+
+function agent_pick_workplace_(agent , agents , par , rejected) {
     var list_with_available_jobs = [];
     for (var i = 0; i < agent.known_workplaces.length ; i++) {
 	var ncmp_info = agent.known_workplaces[i];
 	var employer = agents[ncmp_info.agent_id];
 	var company = employer.companies[ncmp_info.company_id];
 	var available_jobs = employer.opportunities[company.op_id].jobs - company.jobs_filled;
-	if ((company.funded == 1) && (available_jobs > 0)) {
+	if ((company.funded == 1) && (available_jobs > 0) && different_from_all_cmp(ncmp_info , rejected)) {
 	    list_with_available_jobs.push(ncmp_info);
 	}
     }
@@ -798,7 +836,7 @@ function agent_total_jobs_filled(agent) {
     var jobs_filled = 0;
     Object.keys(agent.companies).forEach(function(id){
 	var company = agent.companies[id];
-	if(company_has_produced(agent , company)){
+	if(company_has_filled_job_positions(agent , company)){
 	    jobs_filled += company.jobs_filled;
 	}
     });
@@ -809,7 +847,7 @@ function agent_total_profit(agent) {
     var profit = 0;
     Object.keys(agent.companies).forEach(function(id){
 	var company = agent.companies[id];
-	if(company_has_produced(agent , company)){
+	if(company_has_filled_job_positions(agent , company)){
 	    profit += company_profit(agent, company);
 	}
     });
@@ -820,7 +858,7 @@ function agent_total_wages(agent) {
     var wages = 0;
     Object.keys(agent.companies).forEach(function(id){
 	var company = agent.companies[id];
-	if(company_has_produced(agent , company)){
+	if(company_has_filled_job_positions(agent , company)){
 	    wages += company.jobs_filled * company.provided_wage;
 	}
     });
@@ -832,7 +870,7 @@ function agent_total_produced_value(agent) {
     var value = 0;
     Object.keys(agent.companies).forEach(function(id){
 	var company = agent.companies[id];
-	if(company_has_produced(agent , company)){
+	if(company_has_filled_job_positions(agent , company)){
 	    value += company.units_sold * company.product_price;
 	}
     });
@@ -947,7 +985,7 @@ function Par(){
     this.nl = 10;
     this.na = 1000;
     this.money = 100000;
-    this.op_chance = 100000;
+    this.op_chance = 10000;
     this.jobs_width = 100;
     this.output_width = 100;
     this.cwidth = 4;
@@ -977,6 +1015,7 @@ function Environment(){
     this.total_money = this.par.na * this.par.money;
     this.profit_distr = compute_profit_distr(this.agents , this.total_money);
     this.money_distr = compute_money_distr(this.agents , this.par.money);
+    this.company_size_distr = compute_company_size_distr(this.agents);
 }
 
 function taxation(agents , taxation_rate) {
@@ -1104,12 +1143,66 @@ function compute_total_money(agents) {
 function compute_number_of_companies(agents) {
     var companies = 0;
     agents.forEach(function(agent){
-	if(agent_has_produced(agent)){
+	if(agent_has_filled_job_positions(agent)){
 	    companies++;
 	}
     });
     return companies;
 }
+
+function compute_company_size_distr(agents) {
+    var distr = {};
+    agents.forEach(function(agent){
+	var size = 0;
+        Object.keys(agent.companies).forEach(function(key) {
+	    var company = agent.companies[key];
+	    if(company_has_filled_job_positions(agent, company)){
+		size++
+	    }
+	});
+	if(distr[size] === undefined){
+	    distr[size] = 0;
+	}
+	distr[size]++;
+    });
+
+    var pdistr = [];
+    Object.keys(distr).forEach(function(index){
+	var each = distr[index];
+	if(each != 0) {
+	    pdistr.push(new Point(index , each));
+	}
+    });
+    return pdistr;
+}
+
+
+function compute_company_worker_size_distr(agents) {
+    var distr = {};
+    agents.forEach(function(agent){
+	var size = 0;
+        Object.keys(agent.companies).forEach(function(key) {
+	    var company = agent.companies[key];
+	    if(company_has_filled_job_positions(agent, company)){
+		size += agent.opportunities[company.op_id].jobs;
+	    }
+	});
+	if(distr[size] === undefined){
+	    distr[size] = 0;
+	}
+	distr[size]++;
+    });
+
+    var pdistr = [];
+    Object.keys(distr).forEach(function(index){
+	var each = distr[index];
+	if(each != 0) {
+	    pdistr.push(new Point(index , each));
+	}
+    });
+    return pdistr;
+}
+
 
 
 function compute_average_profit(agents , companies , average_price) {
@@ -1123,7 +1216,7 @@ function compute_profit_distr(agents , average_profit){
     var distr = {};
     var unit = average_profit / 50;
     agents.forEach(function(agent){
-	if(agent_has_produced(agent)) {
+	if(agent_has_filled_job_positions(agent)) {
 	    var position = Math.floor (agent_total_profit(agent) / unit);
 	    //console.log(position);
 	    //console.log(agent);
@@ -1175,6 +1268,7 @@ function equation(t, env) {
     perform_action(env.agents , agent_fund_companies_with_loan , env.par);
     perform_action(env.agents , agent_learn_workplaces , env.par);
     perform_action(env.agents , agent_pick_workplace , env.par);
+    relocate_workers(env.agents , env.par);
     perform_action(env.agents , agent_produce , env.par);
     perform_action(env.agents , agent_learn_products , env.par);
     perform_action(env.agents , agent_consume , env.par);
@@ -1186,6 +1280,7 @@ function equation(t, env) {
 	env.companies = compute_number_of_companies(env.agents);
 	env.profit_distr = compute_profit_distr(env.agents , env.average_profit);
 	env.money_distr = compute_money_distr(env.agents , env.par.money);
+	env.company_size_distr = compute_company_size_distr(env.agents);
 	env.total_lent_money = compute_total_lent_money(env.agents);
 	env.average_price = compute_average_price(env.agents , env.total_sales , env.average_price);
 	env.average_profit = compute_average_profit(env.agents, env.companies , env.average_price);
@@ -1212,6 +1307,7 @@ function equation(t, env) {
 function Dchart(env) {
     this.profit_distr = env.profit_distr;
     this.money_distr = env.money_distr;
+    this.company_size_distr = env.company_size_distr;
 }
 
 function Result(env) {
